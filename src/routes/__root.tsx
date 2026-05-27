@@ -117,8 +117,53 @@ function RootShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+function MissingEnvScreen() {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center bg-[#0a0a0a] px-4 text-white"
+      data-testid="missing-env-screen"
+    >
+      <div className="max-w-xl w-full rounded-2xl border border-amber-500/40 bg-amber-500/5 p-8 shadow-2xl">
+        <div className="text-amber-400 text-xs uppercase tracking-widest">Configuration error</div>
+        <h1 className="mt-2 text-2xl font-bold">
+          Missing{" "}
+          <code className="rounded bg-black/40 px-1.5 py-0.5 text-base">VITE_PRIVY_APP_ID</code>
+        </h1>
+        <p className="mt-3 text-sm text-white/70">
+          The app can't start without a Privy app ID. This usually means your local{" "}
+          <code className="rounded bg-black/40 px-1 text-xs">.env</code> file is missing or empty.
+        </p>
+        <div className="mt-5 rounded-xl border border-white/10 bg-black/40 p-4 text-xs font-mono leading-relaxed">
+          <div className="text-amber-300">How to fix:</div>
+          <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-white/80">
+            <li>
+              Copy <code className="rounded bg-white/5 px-1">.env.example</code> to{" "}
+              <code className="rounded bg-white/5 px-1">.env</code> in the project root.
+            </li>
+            <li>
+              Fill in <code className="rounded bg-white/5 px-1">VITE_PRIVY_APP_ID</code> (and Pinata
+              JWT) with real values.
+            </li>
+            <li>
+              Stop and re-run <code className="rounded bg-white/5 px-1">npm run dev</code> (Vite
+              reads env only at startup).
+            </li>
+          </ol>
+        </div>
+        <p className="mt-4 text-[11px] text-white/40">
+          Get a free Privy app ID at <span className="text-amber-300">dashboard.privy.io</span>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  if (!PRIVY_APP_ID) {
+    return <MissingEnvScreen />;
+  }
 
   return (
     <PrivyProvider

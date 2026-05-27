@@ -80,3 +80,12 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/node_modules/@cloudflare/workerd-linux-arm64/bin/workerd
+node_modules/@cloudflare/workerd-linux-arm64/bin/workerd
+node_modules/@cloudflare/workerd-linux-arm64/bin/workerd
+.env
+.env.*
+*.env
+!.env.example
+credentials.json
+*.key
+.credentials
