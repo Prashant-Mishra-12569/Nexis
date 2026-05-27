@@ -29,7 +29,16 @@
 
 ## What's been implemented (2026-01-27)
 
-### Iteration 2 — Network safety + new-wallet onboarding (latest)
+### Iteration 3 — Routing fix + Save-for-later (latest)
+- **Fixed "+ New idea" / "+ Create first idea" buttons** — Root cause: `dashboard.new-idea.tsx` was a *nested* child route under `dashboard.tsx`, but `dashboard.tsx` has no `<Outlet />`, so the child never rendered. The dashboard layout was just rendered instead with the URL pointing at `/dashboard/new-idea`. Renamed file to `dashboard_.new-idea.tsx` (TanStack flat-path syntax — trailing underscore makes the parent segment pathless) so the route renders independently. Now the full 5-step wizard (Basics → Details → Financials → Team → Review) loads correctly.
+- **Save-for-later bookmark feature** — Replaced the ambiguous Star "info" button in the SwipeDeck with two dedicated buttons:
+  - **Yellow Bookmark** — toggles "save for later" (`toggleSavedIdea`) with a confirmation toast _"Saved to your bookmarks"_ / _"Removed from bookmarks"_, and the icon fills yellow when saved.
+  - **Blue Star** — opens the IdeaExpandView for full details.
+  Also added a matching Bookmark button inside both mobile + desktop variants of `IdeaExpandView`, so users can save while reading.
+- **New profile section "Saved for later"** — Lists all bookmarked ideas (thumbnail, name, industry, ask/equity) with a hover-revealed × button to unsave, and a hint when empty. Updates in real-time when the store changes via `onSavedChange` callback wired through SwipeDeck → IdeaExpandView.
+- **Storage layer** — Added `nexis_saved_ideas` localStorage key with timestamps (so most-recently-saved appear first), `isIdeaSaved` / `toggleSavedIdea` / `getSavedIdeas` helpers, and reset/clear hooks.
+
+### Iteration 2 — Network safety + new-wallet onboarding
 - **Wrong-network detection** — Added `useAuth.isOnMantle` + `chainId` from `useChainId`. A persistent amber **WrongNetworkBanner** is now shown on every authenticated app page when the wallet is on the wrong chain (e.g. Base Sepolia). One-click "Switch to Mantle Sepolia" via `primaryWallet.switchChain(5003)` (Privy) with fallback to `wagmi.switchChain`.
 - **Action-button guards** — Onboarding "Pay 1 MNT", New-idea "Submit Idea", and Dashboard "Boost" buttons are all wrapped in `<NetworkGuard>`. If the wallet is connected but not on Mantle, the action button is replaced by a yellow "Switch to Mantle Sepolia" CTA — making it impossible to ever fire a tx on the wrong chain.
 - **New-wallet auto-redirect** — `AppShell` now checks `getProfile(wallet)` + on-chain `isVerifiedBuilder`. If both are empty and the user is on any app route (not `/` or `/onboarding`), they're redirected to `/onboarding` to pick Builder/Investor before being dropped into the builder/investor flows.

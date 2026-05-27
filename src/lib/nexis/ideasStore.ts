@@ -46,6 +46,7 @@ const SWIPES_KEY = "nexis_swipes";
 const MATCHES_KEY = "nexis_matches";
 const VIEWS_KEY = "nexis_idea_views";
 const SENTIMENT_KEY = "nexis_idea_sentiment";
+const SAVED_KEY = "nexis_saved_ideas";
 
 // Default seed ideas for demo
 const defaultIdeas: Idea[] = [
@@ -263,6 +264,50 @@ export function saveSwipe(ideaId: string, liked: boolean): void {
   }
 }
 
+// ===== Saved (bookmarked) ideas — for later viewing =====
+
+interface SavedMap {
+  [ideaId: string]: number; // saved-at timestamp
+}
+
+function readSavedMap(): SavedMap {
+  if (typeof window === "undefined") return {};
+  const raw = localStorage.getItem(SAVED_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function writeSavedMap(map: SavedMap): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SAVED_KEY, JSON.stringify(map));
+}
+
+export function isIdeaSaved(ideaId: string): boolean {
+  return Boolean(readSavedMap()[ideaId]);
+}
+
+export function toggleSavedIdea(ideaId: string): boolean {
+  const map = readSavedMap();
+  if (map[ideaId]) {
+    delete map[ideaId];
+    writeSavedMap(map);
+    return false;
+  }
+  map[ideaId] = Date.now();
+  writeSavedMap(map);
+  return true;
+}
+
+export function getSavedIdeas(): Idea[] {
+  const map = readSavedMap();
+  const ideas = getIdeas();
+  return ideas.filter((i) => map[i.id]).sort((a, b) => (map[b.id] ?? 0) - (map[a.id] ?? 0));
+}
+
 // ===== Aggregate sentiment (likes/dislikes per idea) =====
 export interface IdeaSentiment {
   likes: number;
@@ -439,6 +484,7 @@ export function clearAllData(): void {
   localStorage.removeItem(MATCHES_KEY);
   localStorage.removeItem(VIEWS_KEY);
   localStorage.removeItem(SENTIMENT_KEY);
+  localStorage.removeItem(SAVED_KEY);
 }
 
 // Reset to default ideas
@@ -449,4 +495,5 @@ export function resetToDefaults(): void {
   localStorage.removeItem(MATCHES_KEY);
   localStorage.removeItem(VIEWS_KEY);
   localStorage.removeItem(SENTIMENT_KEY);
+  localStorage.removeItem(SAVED_KEY);
 }

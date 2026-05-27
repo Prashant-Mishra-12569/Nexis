@@ -15,7 +15,7 @@ import { Route as FeedRouteImport } from './routes/feed'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as DashboardNewIdeaRouteImport } from './routes/dashboard.new-idea'
+import { Route as DashboardNewIdeaRouteImport } from './routes/dashboard_.new-idea'
 
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
@@ -48,15 +48,15 @@ const IndexRoute = IndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardNewIdeaRoute = DashboardNewIdeaRouteImport.update({
-  id: '/new-idea',
-  path: '/new-idea',
-  getParentRoute: () => DashboardRoute,
+  id: '/dashboard_/new-idea',
+  path: '/dashboard/new-idea',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/dashboard': typeof DashboardRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
@@ -65,7 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/dashboard': typeof DashboardRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
@@ -75,11 +75,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/dashboard': typeof DashboardRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
-  '/dashboard/new-idea': typeof DashboardNewIdeaRoute
+  '/dashboard_/new-idea': typeof DashboardNewIdeaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -108,16 +108,17 @@ export interface FileRouteTypes {
     | '/feed'
     | '/onboarding'
     | '/profile'
-    | '/dashboard/new-idea'
+    | '/dashboard_/new-idea'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
-  DashboardRoute: typeof DashboardRouteWithChildren
+  DashboardRoute: typeof DashboardRoute
   FeedRoute: typeof FeedRoute
   OnboardingRoute: typeof OnboardingRoute
   ProfileRoute: typeof ProfileRoute
+  DashboardNewIdeaRoute: typeof DashboardNewIdeaRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -164,35 +165,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dashboard/new-idea': {
-      id: '/dashboard/new-idea'
-      path: '/new-idea'
+    '/dashboard_/new-idea': {
+      id: '/dashboard_/new-idea'
+      path: '/dashboard/new-idea'
       fullPath: '/dashboard/new-idea'
       preLoaderRoute: typeof DashboardNewIdeaRouteImport
-      parentRoute: typeof DashboardRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-interface DashboardRouteChildren {
-  DashboardNewIdeaRoute: typeof DashboardNewIdeaRoute
-}
-
-const DashboardRouteChildren: DashboardRouteChildren = {
-  DashboardNewIdeaRoute: DashboardNewIdeaRoute,
-}
-
-const DashboardRouteWithChildren = DashboardRoute._addFileChildren(
-  DashboardRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
-  DashboardRoute: DashboardRouteWithChildren,
+  DashboardRoute: DashboardRoute,
   FeedRoute: FeedRoute,
   OnboardingRoute: OnboardingRoute,
   ProfileRoute: ProfileRoute,
+  DashboardNewIdeaRoute: DashboardNewIdeaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

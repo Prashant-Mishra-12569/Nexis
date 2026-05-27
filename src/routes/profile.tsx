@@ -10,6 +10,8 @@ import {
   Check,
   Pencil,
   ExternalLink,
+  Bookmark,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { getProfile, getInitials, shortAddress, type UserProfile } from "@/lib/nexis/profileStore";
@@ -17,6 +19,8 @@ import {
   getIdeasByOwner,
   getReceivedRightSwipes,
   getMatches,
+  getSavedIdeas,
+  toggleSavedIdea,
   type Idea,
   type Match,
 } from "@/lib/nexis/ideasStore";
@@ -35,14 +39,16 @@ function ProfilePage() {
   const [rightSwipes, setRightSwipes] = useState(0);
   const [matchCount, setMatchCount] = useState(0);
   const [dealMatches, setDealMatches] = useState<Match[]>([]);
+  const [savedIdeas, setSavedIdeas] = useState<Idea[]>([]);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
+  const loadAll = () => {
     if (!walletAddress) {
       setProfile(null);
       setOwnerIdeas([]);
       setRightSwipes(0);
       setMatchCount(0);
+      setSavedIdeas([]);
       return;
     }
     setProfile(getProfile(walletAddress));
@@ -51,7 +57,15 @@ function ProfilePage() {
     const allMatches = getMatches();
     setMatchCount(allMatches.length);
     setDealMatches(allMatches);
-  }, [walletAddress]);
+    setSavedIdeas(getSavedIdeas());
+  };
+
+  useEffect(loadAll, [walletAddress]);
+
+  const handleUnsave = (ideaId: string) => {
+    toggleSavedIdea(ideaId);
+    setSavedIdeas(getSavedIdeas());
+  };
 
   const handleCopy = async () => {
     if (!walletAddress) return;
@@ -297,6 +311,59 @@ function ProfilePage() {
             )}
           </div>
         )}
+
+        {/* Saved (bookmarked) ideas */}
+        <div className="glass rounded-2xl p-6" data-testid="profile-saved-section">
+          <div className="flex items-center gap-2 mb-4">
+            <Bookmark className="h-4 w-4 text-yellow-400" />
+            <h2 className="font-display font-bold">Saved for later</h2>
+            <span className="text-xs text-muted-foreground">({savedIdeas.length})</span>
+          </div>
+          {savedIdeas.length === 0 ? (
+            <div
+              className="rounded-2xl p-5 border border-dashed border-white/10 text-center text-xs text-muted-foreground"
+              data-testid="profile-saved-empty"
+            >
+              Tap the bookmark icon on any idea card to save it here for later review.
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-3">
+              {savedIdeas.map((idea) => (
+                <div
+                  key={idea.id}
+                  className="glass rounded-xl overflow-hidden hover:neon-border transition-all relative group"
+                  data-testid={`saved-idea-${idea.id}`}
+                >
+                  <Link to="/feed" className="flex">
+                    <img src={idea.image} alt="" className="h-20 w-20 object-cover shrink-0" />
+                    <div className="p-3 flex-1 min-w-0">
+                      <div className="text-[10px] text-yellow-400 uppercase tracking-widest">
+                        {idea.industry}
+                      </div>
+                      <div className="font-display font-bold text-sm mt-0.5 truncate">
+                        {idea.name}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                        {idea.tagline}
+                      </div>
+                      <div className="text-[10px] text-[var(--neon)] font-mono mt-1">
+                        {idea.ask} • {idea.equity} equity
+                      </div>
+                    </div>
+                  </Link>
+                  <button
+                    onClick={() => handleUnsave(idea.id)}
+                    data-testid={`unsave-${idea.id}`}
+                    aria-label={`Remove ${idea.name} from saved`}
+                    className="absolute top-2 right-2 h-7 w-7 rounded-full glass grid place-content-center opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 transition-all"
+                  >
+                    <X className="h-3.5 w-3.5 text-rose-400" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Proof of Funding */}
         <div className="glass rounded-2xl p-6" data-testid="profile-pof-section">

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, PanInfo } from "framer-motion";
-import { X, Check, Star, Sparkles, RefreshCw } from "lucide-react";
+import { X, Check, Star, Sparkles, RefreshCw, Bookmark } from "lucide-react";
 import {
   getUnswipedIdeas,
   saveSwipe,
   resetToDefaults,
   incrementIdeaView,
+  isIdeaSaved,
+  toggleSavedIdea,
   type Idea,
 } from "@/lib/nexis/ideasStore";
 import { IdeaExpandView } from "./IdeaExpandView";
@@ -101,6 +103,7 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
   const [internalIdeas, setInternalIdeas] = useState<Idea[]>([]);
   const [index, setIndex] = useState(0);
   const [expandedIdea, setExpandedIdea] = useState<Idea | null>(null);
+  const [savedFlash, setSavedFlash] = useState<"saved" | "unsaved" | null>(null);
   const viewedRef = useRef<Set<string>>(new Set());
 
   const ideas = controlled ? externalIdeas! : internalIdeas;
@@ -139,6 +142,16 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
   function handleTap() {
     if (current) setExpandedIdea(current);
   }
+
+  function handleSave() {
+    if (!current) return;
+    const nowSaved = toggleSavedIdea(current.id);
+    setSavedFlash(nowSaved ? "saved" : "unsaved");
+    onChanged?.();
+    setTimeout(() => setSavedFlash(null), 1200);
+  }
+
+  const currentSaved = current ? isIdeaSaved(current.id) : false;
 
   function handleReset() {
     resetToDefaults();
@@ -198,36 +211,59 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
           </AnimatePresence>
         </div>
 
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-4">
           <button
             onClick={() => swipe("left")}
             data-testid="swipe-left-btn"
             className="h-14 w-14 rounded-full glass-strong grid place-content-center transition-all duration-300 hover:scale-105 hover:shadow-[0_0_24px_rgba(244,63,94,0.6)] hover:border-rose-500/60 active:scale-95"
+            aria-label="Pass"
           >
             <X className="h-6 w-6 text-rose-400" strokeWidth={2.5} />
           </button>
           <button
+            onClick={handleSave}
+            data-testid="swipe-save-btn"
+            aria-label={currentSaved ? "Remove from saved" : "Save for later"}
+            aria-pressed={currentSaved}
+            className={`h-11 w-11 rounded-full grid place-content-center transition-all duration-300 hover:scale-105 active:scale-95 ${
+              currentSaved
+                ? "bg-yellow-400/20 border border-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]"
+                : "glass hover:border-yellow-400/60 hover:shadow-[0_0_20px_rgba(250,204,21,0.5)]"
+            }`}
+          >
+            <Bookmark
+              className={`h-4 w-4 ${currentSaved ? "fill-yellow-400 text-yellow-400" : "text-yellow-400"}`}
+            />
+          </button>
+          <button
             onClick={handleTap}
             data-testid="swipe-info-btn"
-            className="h-11 w-11 rounded-full glass grid place-content-center transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(250,204,21,0.5)] hover:border-yellow-400/60 active:scale-95"
             aria-label="View details"
+            className="h-11 w-11 rounded-full glass grid place-content-center transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_rgba(96,165,250,0.5)] hover:border-blue-400/60 active:scale-95"
           >
-            <Star className="h-4 w-4 text-yellow-400" />
+            <Star className="h-4 w-4 text-blue-300" />
           </button>
           <button
             onClick={() => swipe("right")}
             data-testid="swipe-right-btn"
             className="h-14 w-14 rounded-full grid place-content-center bg-[var(--neon)] text-black transition-all duration-300 hover:scale-105 neon-glow active:scale-95"
+            aria-label="Like"
           >
             <Check className="h-6 w-6" strokeWidth={3} />
           </button>
         </div>
+        {savedFlash && (
+          <div className="text-xs text-yellow-300" data-testid="swipe-save-toast" role="status">
+            {savedFlash === "saved" ? "Saved to your bookmarks" : "Removed from bookmarks"}
+          </div>
+        )}
       </div>
 
       <IdeaExpandView
         idea={expandedIdea}
         isOpen={!!expandedIdea}
         onClose={() => setExpandedIdea(null)}
+        onSavedChange={onChanged}
         onSwipeRight={() => {
           swipe("right");
           setExpandedIdea(null);

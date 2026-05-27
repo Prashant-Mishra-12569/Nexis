@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -9,22 +9,42 @@ import {
   ExternalLink,
   Linkedin,
   ChevronRight,
+  Bookmark,
 } from "lucide-react";
 import type { Idea } from "@/lib/nexis/ideasStore";
+import { isIdeaSaved, toggleSavedIdea } from "@/lib/nexis/ideasStore";
 
 interface IdeaExpandViewProps {
   idea: Idea | null;
   isOpen: boolean;
   onClose: () => void;
   onSwipeRight?: () => void;
+  onSavedChange?: () => void;
 }
 
 type TabType = "overview" | "team" | "financials";
 
-export function IdeaExpandView({ idea, isOpen, onClose, onSwipeRight }: IdeaExpandViewProps) {
+export function IdeaExpandView({
+  idea,
+  isOpen,
+  onClose,
+  onSwipeRight,
+  onSavedChange,
+}: IdeaExpandViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (idea) setSaved(isIdeaSaved(idea.id));
+  }, [idea]);
 
   if (!idea) return null;
+
+  const handleToggleSave = () => {
+    const nowSaved = toggleSavedIdea(idea.id);
+    setSaved(nowSaved);
+    onSavedChange?.();
+  };
 
   const tabs: { id: TabType; label: string; icon: React.ElementType }[] = [
     { id: "overview", label: "Overview", icon: FileText },
@@ -102,13 +122,28 @@ export function IdeaExpandView({ idea, isOpen, onClose, onSwipeRight }: IdeaExpa
             </div>
 
             {/* CTA */}
-            <div className="p-4 border-t border-white/10">
+            <div className="p-4 border-t border-white/10 flex items-center gap-3">
+              <button
+                onClick={handleToggleSave}
+                data-testid="expand-save-btn"
+                aria-pressed={saved}
+                className={`h-12 w-12 shrink-0 rounded-full grid place-content-center transition-all ${
+                  saved
+                    ? "bg-yellow-400/20 border border-yellow-400 shadow-[0_0_16px_rgba(250,204,21,0.5)]"
+                    : "glass hover:border-yellow-400/60"
+                }`}
+              >
+                <Bookmark
+                  className={`h-5 w-5 ${saved ? "fill-yellow-400 text-yellow-400" : "text-yellow-400"}`}
+                />
+              </button>
               <button
                 onClick={() => {
                   onSwipeRight?.();
                   onClose();
                 }}
-                className="w-full py-3 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-[1.02] active:scale-95 transition-all"
+                data-testid="expand-interested-btn"
+                className="flex-1 py-3 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-[1.02] active:scale-95 transition-all"
               >
                 I'm Interested
               </button>
@@ -175,13 +210,28 @@ export function IdeaExpandView({ idea, isOpen, onClose, onSwipeRight }: IdeaExpa
             </div>
 
             {/* CTA */}
-            <div className="p-6 border-t border-white/10">
+            <div className="p-6 border-t border-white/10 flex items-center gap-3">
+              <button
+                onClick={handleToggleSave}
+                data-testid="expand-save-btn-desktop"
+                aria-pressed={saved}
+                className={`h-12 w-12 shrink-0 rounded-full grid place-content-center transition-all ${
+                  saved
+                    ? "bg-yellow-400/20 border border-yellow-400 shadow-[0_0_16px_rgba(250,204,21,0.5)]"
+                    : "glass hover:border-yellow-400/60"
+                }`}
+              >
+                <Bookmark
+                  className={`h-5 w-5 ${saved ? "fill-yellow-400 text-yellow-400" : "text-yellow-400"}`}
+                />
+              </button>
               <button
                 onClick={() => {
                   onSwipeRight?.();
                   onClose();
                 }}
-                className="w-full py-3.5 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                data-testid="expand-interested-btn-desktop"
+                className="flex-1 py-3.5 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
               >
                 I'm Interested <ChevronRight className="h-4 w-4" />
               </button>

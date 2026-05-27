@@ -34,7 +34,7 @@ import {
 import { getProfile } from "@/lib/nexis/profileStore";
 import { NetworkGuard } from "@/components/nexis/NetworkGuard";
 
-export const Route = createFileRoute("/dashboard/new-idea")({
+export const Route = createFileRoute("/dashboard_/new-idea")({
   component: NewIdeaPage,
 });
 
