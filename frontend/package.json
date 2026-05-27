@@ -1,0 +1,7 @@
+{
+  "name": "nexis-frontend-wrapper",
+  "private": true,
+  "scripts": {
+    "start": "cd .. && /root/.bun/bin/bun run dev"
+  }
+}
