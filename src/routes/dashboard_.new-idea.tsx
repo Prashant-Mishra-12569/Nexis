@@ -26,12 +26,7 @@ import {
   generateIdeaId,
   useIsVerifiedBuilder,
 } from "@/lib/web3/hooks";
-import {
-  addIdea,
-  getIdeasByOwner,
-  type TeamMember as StoredTeamMember,
-} from "@/lib/nexis/ideasStore";
-import { getProfile } from "@/lib/nexis/profileStore";
+import { useNexisData, type TeamMember as StoredTeamMember } from "@/hooks/useNexisData";
 import { NetworkGuard } from "@/components/nexis/NetworkGuard";
 
 export const Route = createFileRoute("/dashboard_/new-idea")({
@@ -120,9 +115,12 @@ function NewIdeaPage() {
     teamMembers: [],
   });
 
+  const { myProfile: profile, addIdea: addIdeaTL, getIdeasByOwner, tablesReady } = useNexisData();
+
   useEffect(() => {
-    setOwnerIdeasCount(getIdeasByOwner(walletAddress).length);
-  }, [walletAddress]);
+    if (!walletAddress) return;
+    getIdeasByOwner(walletAddress).then((ideas) => setOwnerIdeasCount(ideas.length));
+  }, [walletAddress, getIdeasByOwner]);
 
   const isFirstIdea = ownerIdeasCount === 0;
   const txPending = freePending || freeConfirming || extraPending || extraConfirming;
@@ -176,9 +174,8 @@ function NewIdeaPage() {
     }
   };
 
-  const saveLocally = () => {
+  const saveLocally = async () => {
     if (!walletAddress) return null;
-    const profile = getProfile(walletAddress);
     const founder = profile?.name || `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`;
     const team: StoredTeamMember[] = formData.teamMembers
       .filter((m) => m.name.trim())
@@ -187,7 +184,7 @@ function NewIdeaPage() {
     const equityDisplay = `${formData.equity}%`;
     const fallbackImage =
       "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800&auto=format&fit=crop&q=60";
-    const idea = addIdea({
+    const idea = await addIdeaTL({
       name: formData.title,
       tagline: formData.pitch,
       description: formData.description || `${formData.problem}\n\n${formData.solution}`.trim(),
@@ -224,7 +221,7 @@ function NewIdeaPage() {
       return;
     }
 
-    const idea = saveLocally();
+    const idea = await saveLocally();
     if (!idea) return;
     setSavedToStore(true);
 

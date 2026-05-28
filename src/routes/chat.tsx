@@ -1,22 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/nexis/AppShell";
 import { PublicProfileModal } from "@/components/nexis/PublicProfileModal";
-import {
-  acceptMatch,
-  appendMessage,
-  declineMatch,
-  getIdeas,
-  getMatchesForWallet,
-  getMessages,
-  markMatchRead,
-  patchMessage,
-  updateMatch,
-  type Idea,
-  type Match,
-  type Message,
-} from "@/lib/nexis/ideasStore";
-import { getProfile, type UserProfile } from "@/lib/nexis/profileStore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   Send,
   Sparkles,
@@ -28,10 +13,23 @@ import {
   MessageSquare,
   Wallet,
   Hourglass,
+  Shield,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useNexisData, type Match, type Idea } from "@/hooks/useNexisData";
+import { getInitials, shortAddress } from "@/lib/tableland/profiles";
 import { useRequestDealConfirmation, useConfirmDeal } from "@/lib/web3/hooks";
 import { createDealNFTMetadata } from "@/lib/web3/pinata";
+import {
+  initXMTP,
+  sendMessage as xmtpSend,
+  getMessages as xmtpGetMessages,
+  streamMessages,
+  getXMTPClient,
+  canMessageAddress,
+  type XMTPMessage,
+} from "@/lib/web3/xmtp";
+import { useWalletClient } from "wagmi";
 
 export const Route = createFileRoute("/chat")({
   component: ChatPage,
@@ -39,8 +37,19 @@ export const Route = createFileRoute("/chat")({
 
 function ChatPage() {
   const { isAuthenticated, walletAddress, login } = useAuth();
-  const myProfile = walletAddress ? getProfile(walletAddress) : null;
-  const myRole: "builder" | "investor" | null = myProfile?.role ?? null;
+  const {
+    myProfile,
+    myRole,
+    matches,
+    ideas,
+    acceptMatch,
+    declineMatch,
+    updateMatch,
+    refreshMatches,
+    tablesReady,
+    getProfile,
+  } = useNexisData();
+  const { data: walletClient } = useWalletClient();
 
   const {
     requestDeal,
@@ -58,26 +67,19 @@ function ChatPage() {
     error: confirmError,
   } = useConfirmDeal();
 
-  const [matches, setMatches] = useState<Match[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [messages, setMessages] = useState<XMTPMessage[]>([]);
   const [input, setInput] = useState("");
   const [pendingMetadata, setPendingMetadata] = useState(false);
   const [profileWallet, setProfileWallet] = useState<string | null>(null);
-  // The matchId we just requested a deal NFT for — we need it so we can stamp the
-  // dealId on the message once the tx receipt arrives.
-  const [pendingDealRequestForMatchId, setPendingDealRequestForMatchId] = useState<string | null>(
-    null,
-  );
-  const [pendingDealMessageId, setPendingDealMessageId] = useState<string | null>(null);
-
-  const refresh = () => {
-    setMatches(getMatchesForWallet(walletAddress, myRole ?? undefined));
-    setIdeas(getIdeas());
-  };
-
-  useEffect(refresh, [walletAddress, myRole]);
+  const [xmtpReady, setXmtpReady] = useState(false);
+  const [xmtpInitializing, setXmtpInitializing] = useState(false);
+  const [xmtpError, setXmtpError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [pendingDealMatchId, setPendingDealMatchId] = useState<string | null>(null);
+  const [counterpartyProfiles, setCounterpartyProfiles] = useState<Record<string, { name: string; initials: string }>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const streamCleanupRef = useRef<(() => void) | null>(null);
 
   // Auto-select first match
   useEffect(() => {
@@ -86,53 +88,67 @@ function ChatPage() {
     }
   }, [matches, active]);
 
-  // Load messages for the active match
-  useEffect(() => {
-    if (!active) {
-      setMessages([]);
-      return;
+  // Initialize XMTP
+  const initializeXMTP = useCallback(async () => {
+    if (!walletClient || !walletAddress || xmtpReady) return;
+    setXmtpInitializing(true);
+    setXmtpError(null);
+    try {
+      await initXMTP(walletAddress, async (message: string) => {
+        const sig = await walletClient.signMessage({ message });
+        return sig;
+      });
+      setXmtpReady(true);
+    } catch (e) {
+      console.error("XMTP init error:", e);
+      setXmtpError(e instanceof Error ? e.message : "Failed to initialize XMTP");
+    } finally {
+      setXmtpInitializing(false);
     }
-    setMessages(getMessages(active));
-  }, [active]);
+  }, [walletClient, walletAddress, xmtpReady]);
 
-  // Mark current match read on open
+  // Auto-init XMTP when wallet is available
   useEffect(() => {
-    if (!active) return;
-    const m = matches.find((x) => x.id === active);
-    if (!m || !m.unread) return;
-    markMatchRead(active);
-    setMatches((prev) => prev.map((x) => (x.id === active ? { ...x, unread: false } : x)));
-  }, [active, matches]);
+    if (walletClient && walletAddress && !xmtpReady && !xmtpInitializing) {
+      initializeXMTP();
+    }
+  }, [walletClient, walletAddress, xmtpReady, xmtpInitializing, initializeXMTP]);
 
-  // After deal request tx mines, stamp the dealId onto the message and the match
+  // Load counterparty profiles for the match list
   useEffect(() => {
-    if (!dealRequested || !requestedDealId) return;
-    if (!pendingDealRequestForMatchId || !pendingDealMessageId) return;
-
-    patchMessage(pendingDealRequestForMatchId, pendingDealMessageId, { dealId: requestedDealId });
-    updateMatch(pendingDealRequestForMatchId, {
-      dealStatus: "requested",
-      dealId: requestedDealId,
-    });
-    setMessages(getMessages(pendingDealRequestForMatchId));
-    setMatches(getMatchesForWallet(walletAddress, myRole ?? undefined));
-    setPendingDealRequestForMatchId(null);
-    setPendingDealMessageId(null);
-  }, [
-    dealRequested,
-    requestedDealId,
-    pendingDealRequestForMatchId,
-    pendingDealMessageId,
-    walletAddress,
-    myRole,
-  ]);
-
-  // After investor confirms deal on-chain, mark match dealStatus = confirmed
-  useEffect(() => {
-    if (!dealConfirmed || !active) return;
-    updateMatch(active, { dealStatus: "confirmed" });
-    setMatches(getMatchesForWallet(walletAddress, myRole ?? undefined));
-  }, [dealConfirmed, active, walletAddress, myRole]);
+    if (!walletAddress) return;
+    const loadProfiles = async () => {
+      const profiles: Record<string, { name: string; initials: string }> = {};
+      for (const m of matches) {
+        const counterW =
+          m.builderWallet.toLowerCase() === walletAddress.toLowerCase()
+            ? m.investorWallet
+            : m.builderWallet;
+        if (!counterW || profiles[counterW.toLowerCase()]) continue;
+        try {
+          const p = await getProfile(counterW);
+          if (p) {
+            profiles[counterW.toLowerCase()] = {
+              name: p.name || shortAddress(counterW),
+              initials: getInitials(p, counterW),
+            };
+          } else {
+            profiles[counterW.toLowerCase()] = {
+              name: shortAddress(counterW),
+              initials: counterW.slice(2, 4).toUpperCase(),
+            };
+          }
+        } catch {
+          profiles[counterW.toLowerCase()] = {
+            name: shortAddress(counterW),
+            initials: counterW.slice(2, 4).toUpperCase(),
+          };
+        }
+      }
+      setCounterpartyProfiles(profiles);
+    };
+    loadProfiles();
+  }, [matches, walletAddress, getProfile]);
 
   const current = useMemo(() => matches.find((m) => m.id === active) ?? null, [matches, active]);
   const currentIdea = useMemo(
@@ -140,64 +156,113 @@ function ChatPage() {
     [current, ideas],
   );
   const iAmBuilder =
-    !!current &&
-    walletAddress &&
-    current.builderWallet?.toLowerCase() === walletAddress.toLowerCase();
+    !!current && walletAddress && current.builderWallet?.toLowerCase() === walletAddress.toLowerCase();
   const iAmInvestor =
-    !!current &&
-    walletAddress &&
-    current.investorWallet?.toLowerCase() === walletAddress.toLowerCase();
+    !!current && walletAddress && current.investorWallet?.toLowerCase() === walletAddress.toLowerCase();
   const counterpartyWallet = iAmBuilder ? current?.investorWallet : current?.builderWallet;
-  const counterpartyProfile = counterpartyWallet ? getProfile(counterpartyWallet) : null;
-  const counterpartyName =
-    counterpartyProfile?.name ||
-    (iAmBuilder ? `Investor ${current?.investorWallet?.slice(0, 6)}…` : current?.builderName) ||
-    "Counterparty";
-  const counterpartyInitials = (
-    counterpartyProfile?.name?.slice(0, 2) ||
-    counterpartyWallet?.slice(2, 4) ||
-    "??"
-  ).toUpperCase();
+  const cpKey = counterpartyWallet?.toLowerCase() || "";
+  const counterpartyName = counterpartyProfiles[cpKey]?.name || (iAmBuilder ? `Investor ${current?.investorWallet?.slice(0, 6)}…` : current?.builderName) || "Counterparty";
+  const counterpartyInitials = counterpartyProfiles[cpKey]?.initials || counterpartyWallet?.slice(2, 4)?.toUpperCase() || "??";
 
   const isAccepted = current?.status === "accepted";
   const isPending = current?.status === "pending";
 
-  function send() {
-    if (!input.trim() || !active || !walletAddress) return;
-    appendMessage({
-      matchId: active,
-      senderWallet: walletAddress,
-      text: input,
-      type: "text",
-    });
-    setMessages(getMessages(active));
-    setMatches((prev) => prev.map((m) => (m.id === active ? { ...m, lastMessage: input } : m)));
-    setInput("");
-  }
-
-  function handleAccept() {
-    if (!active) return;
-    acceptMatch(active);
-    if (walletAddress) {
-      appendMessage({
-        matchId: active,
-        senderWallet: walletAddress,
-        text: `${myProfile?.name || "Builder"} accepted the interest. Let's chat!`,
-        type: "text",
-      });
+  // Load messages for active match via XMTP
+  useEffect(() => {
+    if (!active || !xmtpReady || !counterpartyWallet) {
+      setMessages([]);
+      return;
     }
-    setMatches(getMatchesForWallet(walletAddress, myRole ?? undefined));
-    setMessages(getMessages(active));
+    // Load existing messages
+    xmtpGetMessages(counterpartyWallet).then(setMessages).catch(console.error);
+
+    // Stream new messages
+    streamCleanupRef.current?.();
+    streamMessages(counterpartyWallet, (msg) => {
+      setMessages((prev) => {
+        if (prev.find((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+    }).then((cleanup) => {
+      streamCleanupRef.current = cleanup;
+    });
+
+    return () => {
+      streamCleanupRef.current?.();
+    };
+  }, [active, xmtpReady, counterpartyWallet]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Mark match read
+  useEffect(() => {
+    if (!active || !current?.unread) return;
+    updateMatch(active, { unread: false }).catch(console.error);
+  }, [active, current, updateMatch]);
+
+  // After deal request tx mines, stamp the dealId on the match
+  useEffect(() => {
+    if (!dealRequested || !requestedDealId || !pendingDealMatchId) return;
+    updateMatch(pendingDealMatchId, {
+      dealStatus: "requested",
+      dealId: requestedDealId,
+    }).catch(console.error);
+    setPendingDealMatchId(null);
+    refreshMatches();
+  }, [dealRequested, requestedDealId, pendingDealMatchId, updateMatch, refreshMatches]);
+
+  // After investor confirms deal, mark confirmed
+  useEffect(() => {
+    if (!dealConfirmed || !active) return;
+    updateMatch(active, { dealStatus: "confirmed" }).catch(console.error);
+    refreshMatches();
+  }, [dealConfirmed, active, updateMatch, refreshMatches]);
+
+  async function send() {
+    if (!input.trim() || !counterpartyWallet || sending) return;
+    setSending(true);
+    try {
+      if (xmtpReady) {
+        const sent = await xmtpSend(counterpartyWallet, input);
+        if (sent) {
+          // Refresh messages
+          const msgs = await xmtpGetMessages(counterpartyWallet);
+          setMessages(msgs);
+          // Update last message on match
+          if (active) {
+            updateMatch(active, { lastMessage: input }).catch(console.error);
+          }
+        }
+      }
+      setInput("");
+    } catch (e) {
+      console.error("Send failed:", e);
+    } finally {
+      setSending(false);
+    }
   }
 
-  function handleDecline() {
+  async function handleAccept() {
     if (!active) return;
-    declineMatch(active);
-    const remaining = getMatchesForWallet(walletAddress, myRole ?? undefined).filter(
-      (m) => m.status !== "declined",
-    );
-    setMatches(remaining);
-    setActive(remaining[0]?.id ?? null);
+    await acceptMatch(active);
+    // Send a system message via XMTP
+    if (xmtpReady && counterpartyWallet) {
+      await xmtpSend(
+        counterpartyWallet,
+        `${myProfile?.name || "Builder"} accepted the interest. Let's chat!`,
+      );
+    }
+    refreshMatches();
+  }
+
+  async function handleDecline() {
+    if (!active) return;
+    await declineMatch(active);
+    refreshMatches();
+    setActive(matches.find((m) => m.id !== active)?.id ?? null);
   }
 
   async function handleRequestDealNFT() {
@@ -205,9 +270,7 @@ function ChatPage() {
     setPendingMetadata(true);
     try {
       const investorAddress =
-        current.investorWallet &&
-        current.investorWallet.startsWith("0x") &&
-        current.investorWallet.length >= 42
+        current.investorWallet?.startsWith("0x") && current.investorWallet.length >= 42
           ? current.investorWallet
           : "0x000000000000000000000000000000000000dEaD";
 
@@ -220,23 +283,20 @@ function ChatPage() {
       });
 
       if (!metadataResult.success || !metadataResult.ipfsUrl) {
-        console.error("Pinata metadata upload failed", metadataResult.error);
+        console.error("Metadata upload failed", metadataResult.error);
         setPendingMetadata(false);
         return;
       }
 
-      // Append the deal request message immediately so investor sees it
-      const msg = appendMessage({
-        matchId: current.id,
-        senderWallet: walletAddress,
-        text: `${myProfile?.name || "Builder"} has requested a Deal NFT confirmation. Please confirm on-chain to mint the soulbound badge to the builder.`,
-        type: "deal_request",
-        tokenURI: metadataResult.ipfsUrl,
-      });
-      setPendingDealRequestForMatchId(current.id);
-      setPendingDealMessageId(msg.id);
-      setMessages(getMessages(current.id));
+      // Send deal request via XMTP
+      if (xmtpReady && counterpartyWallet) {
+        await xmtpSend(
+          counterpartyWallet,
+          `🏆 ${myProfile?.name || "Builder"} has requested a Deal NFT confirmation for "${current.ideaName}". Please confirm on-chain to mint the soulbound badge.`,
+        );
+      }
 
+      setPendingDealMatchId(current.id);
       requestDeal(investorAddress, current.ideaName, metadataResult.ipfsUrl);
     } catch (error) {
       console.error("Failed to request deal NFT:", error);
@@ -245,12 +305,12 @@ function ChatPage() {
     }
   }
 
-  function handleConfirmDeal(msg: Message) {
-    if (!msg.dealId) {
-      console.warn("Cannot confirm: dealId missing (tx receipt not yet processed)");
+  function handleConfirmDeal() {
+    if (!current?.dealId) {
+      console.warn("Cannot confirm: dealId missing");
       return;
     }
-    confirmDeal(msg.dealId);
+    confirmDeal(current.dealId);
   }
 
   // ===== Render =====
@@ -265,11 +325,10 @@ function ChatPage() {
               Connect to see your matches
             </h2>
             <p className="text-muted-foreground text-sm mt-2 max-w-md mx-auto">
-              Conversations are end-to-end secured via your wallet signature.
+              Conversations are end-to-end encrypted via XMTP.
             </p>
             <button
               onClick={() => login()}
-              data-testid="chat-connect-btn"
               className="mt-6 inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-105 transition-all"
             >
               <Wallet className="h-4 w-4" /> Connect wallet
@@ -283,10 +342,7 @@ function ChatPage() {
   if (matches.length === 0) {
     return (
       <AppShell>
-        <div
-          className="flex flex-col items-center justify-center min-h-[60vh] px-4"
-          data-testid="chat-empty"
-        >
+        <div className="flex flex-col items-center justify-center min-h-[60vh] px-4" data-testid="chat-empty">
           <div className="glass-strong rounded-3xl p-8 text-center max-w-md neon-border">
             <MessageSquare className="h-12 w-12 text-[var(--neon)] mx-auto mb-4" />
             <h2 className="font-display text-2xl font-bold mb-2">
@@ -294,12 +350,11 @@ function ChatPage() {
             </h2>
             <p className="text-muted-foreground text-sm mb-6">
               {myRole === "investor"
-                ? "Swipe right on a startup to express interest. The builder will see it and accept or decline."
+                ? "Swipe right on a startup to express interest. The builder will see it and can accept."
                 : "Once an investor swipes right on one of your ideas, they'll appear here for you to accept or decline."}
             </p>
             <Link
               to={myRole === "investor" ? "/feed" : "/dashboard/new-idea"}
-              data-testid="chat-go-feed-btn"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[var(--neon)] text-black font-semibold hover:scale-105 transition-all"
             >
               {myRole === "investor" ? "Start swiping" : "Add new idea"}
@@ -316,7 +371,7 @@ function ChatPage() {
     <AppShell>
       <div className="md:px-8 md:pt-6 max-w-6xl mx-auto" data-testid="chat-page">
         <div className="grid md:grid-cols-[300px_1fr] gap-0 md:gap-6 h-[calc(100vh-180px)] md:h-[calc(100vh-140px)]">
-          {/* Matches list */}
+          {/* Matches sidebar */}
           <div className="glass md:rounded-2xl overflow-hidden border-y md:border border-white/5">
             <div className="p-4 border-b border-white/5">
               <div className="text-xs text-[var(--neon)] uppercase tracking-widest">
@@ -324,36 +379,25 @@ function ChatPage() {
               </div>
               <div className="font-display text-lg font-bold">Inbox</div>
             </div>
-            <div
-              className="overflow-y-auto max-h-[calc(100vh-280px)]"
-              data-testid="chat-match-list"
-            >
+            <div className="overflow-y-auto max-h-[calc(100vh-280px)]">
               {matches.map((m) => {
-                const counterpartyW =
+                const counterW =
                   walletAddress && m.builderWallet.toLowerCase() === walletAddress.toLowerCase()
                     ? m.investorWallet
                     : m.builderWallet;
-                const cprof = getProfile(counterpartyW);
-                const nm =
-                  cprof?.name ||
-                  (walletAddress && m.builderWallet.toLowerCase() === walletAddress.toLowerCase()
-                    ? `Investor ${m.investorWallet.slice(0, 6)}…`
-                    : m.builderName);
+                const ck = counterW?.toLowerCase() || "";
+                const nm = counterpartyProfiles[ck]?.name || shortAddress(counterW);
+                const ini = counterpartyProfiles[ck]?.initials || counterW?.slice(2, 4)?.toUpperCase() || "??";
                 return (
                   <button
                     key={m.id}
                     onClick={() => setActive(m.id)}
-                    data-testid={`match-item-${m.id}`}
                     className={`w-full flex items-start gap-3 p-4 border-b border-white/5 text-left transition-colors ${
                       active === m.id ? "bg-[var(--neon)]/5" : "hover:bg-white/5"
                     }`}
                   >
                     <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[var(--neon)]/40 to-emerald-900 grid place-content-center text-xs font-bold shrink-0">
-                      {(
-                        cprof?.name?.slice(0, 2) ||
-                        counterpartyW.slice(2, 4) ||
-                        "??"
-                      ).toUpperCase()}
+                      {ini}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
@@ -385,21 +429,19 @@ function ChatPage() {
             </div>
           </div>
 
-          {/* Conversation */}
+          {/* Chat area */}
           <div className="glass md:rounded-2xl flex flex-col overflow-hidden border-y md:border border-white/5">
+            {/* Header */}
             <div className="p-4 border-b border-white/5 flex items-center justify-between">
               <button
                 onClick={() => counterpartyWallet && setProfileWallet(counterpartyWallet)}
-                data-testid="chat-active-header"
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
                 <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[var(--neon)]/40 to-emerald-900 grid place-content-center text-xs font-bold">
                   {counterpartyInitials}
                 </div>
                 <div className="text-left">
-                  <div className="font-medium text-sm" data-testid="chat-active-counterparty">
-                    {counterpartyName}
-                  </div>
+                  <div className="font-medium text-sm">{counterpartyName}</div>
                   <div className="text-[11px] text-[var(--neon)]">
                     re: {current.ideaName}
                     {currentIdea && (
@@ -408,71 +450,99 @@ function ChatPage() {
                   </div>
                 </div>
               </button>
-              {/* Request Deal NFT — builders only, after accept */}
-              {iAmBuilder && isAccepted && current.dealStatus !== "confirmed" && (
-                <button
-                  onClick={handleRequestDealNFT}
-                  disabled={
-                    pendingMetadata ||
-                    isRequestingDeal ||
-                    isConfirmingRequest ||
-                    current.dealStatus === "requested"
-                  }
-                  data-testid="chat-deal-nft-btn"
-                  className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full neon-border text-[var(--neon)] text-xs hover:bg-[var(--neon)] hover:text-black transition-all disabled:opacity-50"
+
+              <div className="flex items-center gap-2">
+                {/* XMTP status indicator */}
+                <div
+                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-[9px] ${
+                    xmtpReady
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-amber-500/10 text-amber-400"
+                  }`}
                 >
-                  {pendingMetadata || isRequestingDeal || isConfirmingRequest ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
-                      {pendingMetadata ? "Pinning…" : isRequestingDeal ? "Confirm…" : "Mining…"}
-                    </>
-                  ) : current.dealStatus === "requested" ? (
-                    <>
-                      <Hourglass className="h-3.5 w-3.5" /> Awaiting investor
-                    </>
-                  ) : (
-                    <>
-                      <Award className="h-3.5 w-3.5" /> Request Deal NFT
-                    </>
-                  )}
-                </button>
-              )}
-              {current.dealStatus === "confirmed" && (
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--neon)]/10 text-[var(--neon)] text-xs neon-border">
-                  <Check className="h-3.5 w-3.5" /> Deal NFT minted
+                  <Shield className="h-3 w-3" />
+                  {xmtpReady ? "E2E" : "Connecting…"}
                 </div>
-              )}
+
+                {/* Deal NFT request — BUILDER ONLY */}
+                {iAmBuilder && isAccepted && current.dealStatus !== "confirmed" && (
+                  <button
+                    onClick={handleRequestDealNFT}
+                    disabled={
+                      pendingMetadata || isRequestingDeal || isConfirmingRequest || current.dealStatus === "requested"
+                    }
+                    className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full neon-border text-[var(--neon)] text-xs hover:bg-[var(--neon)] hover:text-black transition-all disabled:opacity-50"
+                  >
+                    {pendingMetadata || isRequestingDeal || isConfirmingRequest ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {pendingMetadata ? "Pinning…" : isRequestingDeal ? "Confirm…" : "Mining…"}
+                      </>
+                    ) : current.dealStatus === "requested" ? (
+                      <>
+                        <Hourglass className="h-3.5 w-3.5" /> Awaiting investor
+                      </>
+                    ) : (
+                      <>
+                        <Award className="h-3.5 w-3.5" /> Request Deal NFT
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Investor sees "Confirm Deal" button when requested */}
+                {iAmInvestor && current.dealStatus === "requested" && (
+                  <button
+                    onClick={handleConfirmDeal}
+                    disabled={isConfirmPending || isConfirmMining || !current.dealId}
+                    className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--neon)] text-black text-xs font-semibold hover:scale-105 transition-all disabled:opacity-50"
+                  >
+                    {isConfirmPending || isConfirmMining ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {isConfirmPending ? "Confirm…" : "Minting…"}
+                      </>
+                    ) : !current.dealId ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for receipt…
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3.5 w-3.5" /> Confirm & Mint NFT
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {current.dealStatus === "confirmed" && (
+                  <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--neon)]/10 text-[var(--neon)] text-xs neon-border">
+                    <Check className="h-3.5 w-3.5" /> Deal NFT minted
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div
-              className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3"
-              data-testid="chat-messages-area"
-            >
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3">
               {/* Builder Accept/Decline prompt */}
               {iAmBuilder && isPending && (
-                <div
-                  className="glass-strong rounded-2xl p-5 neon-border text-center space-y-3"
-                  data-testid="chat-accept-prompt"
-                >
+                <div className="glass-strong rounded-2xl p-5 neon-border text-center space-y-3">
                   <Sparkles className="h-6 w-6 text-[var(--neon)] mx-auto" />
                   <div className="font-display font-bold">
                     {counterpartyName} swiped right on {current.ideaName}.
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Accept to open the chat and explore the deal. Decline to remove this interest
-                    from your inbox.
+                    Accept to open the chat and explore the deal. Decline to remove this interest.
                   </div>
                   <div className="flex gap-2 justify-center pt-1">
                     <button
                       onClick={handleAccept}
-                      data-testid="chat-accept-btn"
                       className="px-5 py-2 rounded-full bg-[var(--neon)] text-black font-semibold text-sm flex items-center gap-1.5 hover:scale-105 transition-all"
                     >
                       <Check className="h-4 w-4" /> Accept
                     </button>
                     <button
                       onClick={handleDecline}
-                      data-testid="chat-decline-btn"
                       className="px-5 py-2 rounded-full border border-rose-500/40 text-rose-400 text-sm flex items-center gap-1.5 hover:bg-rose-500/10 transition-all"
                     >
                       <X className="h-4 w-4" /> Decline
@@ -483,110 +553,132 @@ function ChatPage() {
 
               {/* Investor waiting state */}
               {iAmInvestor && isPending && (
-                <div
-                  className="glass-strong rounded-2xl p-5 neon-border text-center space-y-3"
-                  data-testid="chat-waiting-prompt"
-                >
+                <div className="glass-strong rounded-2xl p-5 neon-border text-center space-y-3">
                   <Hourglass className="h-6 w-6 text-amber-400 mx-auto" />
                   <div className="font-display font-bold">
                     Waiting for the builder to accept your interest.
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {current.builderName} will be notified. Once they accept, you can start
-                    chatting.
+                    {current.builderName} will be notified. Once they accept, you can start chatting.
                   </div>
                 </div>
               )}
 
-              {messages.map((msg) => {
-                const isMine =
-                  walletAddress && msg.senderWallet.toLowerCase() === walletAddress.toLowerCase();
+              {/* XMTP not ready */}
+              {!xmtpReady && isAccepted && (
+                <div className="glass rounded-2xl p-4 text-center space-y-2 border border-amber-500/30">
+                  {xmtpInitializing ? (
+                    <>
+                      <Loader2 className="h-5 w-5 text-amber-400 mx-auto animate-spin" />
+                      <p className="text-xs text-amber-300">Initializing E2E encryption…</p>
+                    </>
+                  ) : xmtpError ? (
+                    <>
+                      <p className="text-xs text-rose-400">{xmtpError}</p>
+                      <button
+                        onClick={initializeXMTP}
+                        className="text-xs text-[var(--neon)] hover:underline"
+                      >
+                        Retry
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="h-5 w-5 text-amber-400 mx-auto" />
+                      <p className="text-xs text-amber-300">Setting up XMTP encryption…</p>
+                    </>
+                  )}
+                </div>
+              )}
 
-                if (msg.type === "deal_request") {
-                  // System-style card. Investor sees a Confirm button (if they're the investor).
-                  const canConfirm = iAmInvestor && current.dealStatus === "requested";
-                  return (
-                    <div
-                      key={msg.id}
-                      className="flex justify-center"
-                      data-testid={`deal-request-${msg.id}`}
-                    >
-                      <div className="max-w-md w-full glass-strong rounded-2xl p-5 neon-border space-y-3 text-center">
-                        <Award className="h-6 w-6 text-[var(--neon)] mx-auto" />
-                        <div className="font-display font-bold text-sm">Deal NFT requested</div>
-                        <div className="text-xs text-muted-foreground">{msg.text}</div>
-                        {canConfirm ? (
-                          <button
-                            onClick={() => handleConfirmDeal(msg)}
-                            disabled={isConfirmPending || isConfirmMining || !msg.dealId}
-                            data-testid="chat-confirm-deal-btn"
-                            className="px-5 py-2 rounded-full bg-[var(--neon)] text-black text-sm font-semibold flex items-center gap-2 mx-auto hover:scale-105 transition-all disabled:opacity-50"
-                          >
-                            {isConfirmPending || isConfirmMining ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
-                                {isConfirmPending ? "Confirm in wallet…" : "Minting…"}
-                              </>
-                            ) : !msg.dealId ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for
-                                on-chain receipt…
-                              </>
-                            ) : (
-                              <>
-                                <Check className="h-3.5 w-3.5" /> Confirm & Mint NFT
-                              </>
-                            )}
-                          </button>
-                        ) : current.dealStatus === "confirmed" ? (
-                          <div className="text-xs text-[var(--neon)]">
-                            Deal NFT minted to the builder ✓
-                          </div>
-                        ) : iAmBuilder ? (
-                          <div className="text-xs text-amber-300">
-                            Awaiting investor confirmation…
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
+              {/* Messages from XMTP */}
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`flex ${msg.isFromMe ? "justify-end" : "justify-start"}`}
+                >
                   <div
-                    key={msg.id}
-                    className={`flex ${isMine ? "justify-end" : "justify-start"}`}
-                    data-testid={`message-${msg.id}`}
+                    className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${
+                      msg.isFromMe
+                        ? "bg-[var(--neon)]/10 text-[var(--neon)] neon-border"
+                        : "bg-white/5 text-white border border-white/10"
+                    }`}
                   >
-                    <div
-                      className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${
-                        isMine
-                          ? "bg-[var(--neon)]/10 text-[var(--neon)] neon-border"
-                          : "bg-white/5 text-white border border-white/10"
-                      }`}
-                    >
-                      {msg.text}
+                    {msg.content}
+                    <div className="text-[9px] text-muted-foreground mt-1 text-right">
+                      {msg.sent.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
+
+              {/* Deal status cards */}
+              {current.dealStatus === "requested" && (
+                <div className="flex justify-center">
+                  <div className="max-w-md w-full glass-strong rounded-2xl p-5 neon-border space-y-3 text-center">
+                    <Award className="h-6 w-6 text-[var(--neon)] mx-auto" />
+                    <div className="font-display font-bold text-sm">Deal NFT Requested</div>
+                    <div className="text-xs text-muted-foreground">
+                      {iAmBuilder
+                        ? "Waiting for investor to confirm the deal on-chain…"
+                        : "The builder has requested a Deal NFT. Confirm to mint."}
+                    </div>
+                    {iAmInvestor && (
+                      <button
+                        onClick={handleConfirmDeal}
+                        disabled={isConfirmPending || isConfirmMining || !current.dealId}
+                        className="px-5 py-2 rounded-full bg-[var(--neon)] text-black text-sm font-semibold flex items-center gap-2 mx-auto hover:scale-105 transition-all disabled:opacity-50"
+                      >
+                        {isConfirmPending || isConfirmMining ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {isConfirmPending ? "Confirm in wallet…" : "Minting…"}
+                          </>
+                        ) : !current.dealId ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for receipt…
+                          </>
+                        ) : (
+                          <>
+                            <Check className="h-3.5 w-3.5" /> Confirm & Mint NFT
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {current.dealStatus === "confirmed" && (
+                <div className="flex justify-center">
+                  <div className="max-w-md w-full glass-strong rounded-2xl p-5 neon-border space-y-2 text-center">
+                    <Award className="h-6 w-6 text-[var(--neon)] mx-auto" />
+                    <div className="font-display font-bold text-sm text-[var(--neon)]">
+                      Deal NFT Minted! 🎉
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Soulbound proof-of-funding badge has been minted to the builder.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {(dealError || confirmError) && (
-                <div
-                  className="glass rounded-xl p-3 text-xs text-rose-400 border border-rose-500/30"
-                  data-testid="chat-deal-error"
-                >
+                <div className="glass rounded-xl p-3 text-xs text-rose-400 border border-rose-500/30">
                   {(dealError || confirmError)?.message}
                 </div>
               )}
+
+              <div ref={messagesEndRef} />
             </div>
 
+            {/* Input */}
             {isAccepted && (
               <div className="p-3 md:p-4 border-t border-white/5">
                 <div className="flex items-center gap-2 mb-2">
                   <Lock className="h-3 w-3 text-[var(--neon)]" />
                   <span className="text-[10px] text-muted-foreground">
-                    Messages signed by your wallet
+                    {xmtpReady ? "End-to-end encrypted via XMTP" : "Messages signed by your wallet"}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -595,17 +687,20 @@ function ChatPage() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && send()}
                     placeholder="Type a message…"
-                    data-testid="chat-message-input"
-                    className="flex-1 bg-white/5 rounded-full px-5 py-3 text-sm outline-none border border-white/5 focus:border-[var(--neon)]/40 transition-colors"
+                    disabled={!xmtpReady}
+                    className="flex-1 bg-white/5 rounded-full px-5 py-3 text-sm outline-none border border-white/5 focus:border-[var(--neon)]/40 transition-colors disabled:opacity-50"
                   />
                   <button
                     onClick={send}
-                    disabled={!input.trim()}
-                    data-testid="chat-send-btn"
+                    disabled={!input.trim() || !xmtpReady || sending}
                     aria-label="Send message"
-                    className="h-11 w-11 rounded-full bg-[var(--neon)] text-black grid place-content-center neon-glow hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
+                    className="h-11 w-11 rounded-full bg-[var(--neon)] text-black grid place-content-center neon-glow hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
                   >
-                    <Send className="h-4 w-4" />
+                    {sending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
                   </button>
                 </div>
               </div>

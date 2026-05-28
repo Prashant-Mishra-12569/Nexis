@@ -1,10 +1,13 @@
-import { Client, type Conversation, type DecodedMessage } from "@xmtp/xmtp-js";
-
-// Use a structural Signer type (compatible with ethers and viem-wrapped signers)
-type Signer = {
-  getAddress(): Promise<string>;
-  signMessage(message: string | Uint8Array): Promise<string>;
-};
+/**
+ * XMTP Browser SDK v7 Integration for Nexis
+ * E2E encrypted cross-device messaging
+ */
+import {
+  Client,
+  IdentifierKind,
+  type Signer as XMTPSigner,
+  type Dm,
+} from "@xmtp/browser-sdk";
 
 let xmtpClient: Client | null = null;
 
@@ -16,34 +19,45 @@ export interface XMTPMessage {
   isFromMe: boolean;
 }
 
-export interface XMTPConversation {
-  peerAddress: string;
-  topic: string;
-  createdAt: Date;
-  context?: {
-    conversationId: string;
-    metadata: Record<string, string>;
+/**
+ * Create an XMTP-compatible signer from Privy/viem wallet
+ */
+function createXMTPSigner(
+  walletAddress: string,
+  signMessageFn: (message: string) => Promise<string>,
+): XMTPSigner {
+  return {
+    type: "EOA",
+    getIdentifier: () => ({
+      identifier: walletAddress,
+      identifierKind: IdentifierKind.Ethereum,
+    }),
+    signMessage: async (message: string) => {
+      const sig = await signMessageFn(message);
+      const hex = sig.startsWith("0x") ? sig.slice(2) : sig;
+      return Uint8Array.from(
+        hex.match(/.{1,2}/g)!.map((b: string) => parseInt(b, 16)),
+      );
+    },
   };
 }
 
 /**
- * Initialize XMTP client with a signer
+ * Initialize XMTP client with a wallet
  */
-export async function initXMTP(signer: Signer): Promise<Client> {
-  if (xmtpClient) {
-    return xmtpClient;
-  }
+export async function initXMTP(
+  walletAddress: string,
+  signMessageFn: (message: string) => Promise<string>,
+): Promise<Client> {
+  if (xmtpClient) return xmtpClient;
 
-  try {
-    xmtpClient = await Client.create(signer, {
-      env: "production", // Use 'dev' for testing
-    });
-    console.log("XMTP client initialized for:", xmtpClient.address);
-    return xmtpClient;
-  } catch (error) {
-    console.error("Failed to initialize XMTP:", error);
-    throw error;
-  }
+  const signer = createXMTPSigner(walletAddress, signMessageFn);
+  xmtpClient = await Client.create(signer, {
+    env: "production",
+  });
+
+  console.log("XMTP client initialized for:", walletAddress);
+  return xmtpClient;
 }
 
 /**
@@ -63,194 +77,173 @@ export function disconnectXMTP(): void {
 /**
  * Check if an address can receive XMTP messages
  */
-export async function canMessage(address: string): Promise<boolean> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
-  }
-
+export async function canMessageAddress(address: string): Promise<boolean> {
+  if (!xmtpClient) return false;
   try {
-    return await xmtpClient.canMessage(address);
-  } catch (error) {
-    console.error("Error checking if can message:", error);
+    const result = await Client.canMessage([
+      { identifier: address, identifierKind: IdentifierKind.Ethereum },
+    ]);
+    return result.get(address) ?? false;
+  } catch (e) {
+    console.error("canMessage error:", e);
     return false;
   }
 }
 
 /**
- * Start a new conversation with context (for Nexis matching)
+ * Get or create a DM conversation with a peer
  */
-export async function startConversation(
+async function getOrCreateDm(peerAddress: string): Promise<Dm | null> {
+  if (!xmtpClient) return null;
+
+  try {
+    // First check existing conversations
+    const conversations = await xmtpClient.conversations.list();
+    for (const conv of conversations) {
+      if (conv.peerInboxId) {
+        // Check if this conversation involves the peer address
+        const members = await conv.members;
+        const hasPeer = members.some(
+          (m: { addresses: string[] }) =>
+            m.addresses.some(
+              (a: string) => a.toLowerCase() === peerAddress.toLowerCase(),
+            ),
+        );
+        if (hasPeer) return conv as Dm;
+      }
+    }
+
+    // Create new DM
+    const dm = await xmtpClient.conversations.createDm({
+      identifier: peerAddress,
+      identifierKind: IdentifierKind.Ethereum,
+    });
+    return dm;
+  } catch (e) {
+    console.error("getOrCreateDm error:", e);
+    return null;
+  }
+}
+
+/**
+ * Send a text message to a peer
+ */
+export async function sendMessage(
   peerAddress: string,
-  ideaName: string,
-  matchType: "investor_interest" | "builder_accept",
-): Promise<Conversation> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
+  content: string,
+): Promise<boolean> {
+  const dm = await getOrCreateDm(peerAddress);
+  if (!dm) return false;
+
+  try {
+    await dm.sendText(content);
+    return true;
+  } catch (e) {
+    console.error("sendMessage error:", e);
+    return false;
   }
-
-  const conversation = await xmtpClient.conversations.newConversation(peerAddress, {
-    conversationId: `nexis-${ideaName}-${Date.now()}`,
-    metadata: {
-      app: "nexis",
-      ideaName,
-      matchType,
-      timestamp: new Date().toISOString(),
-    },
-  });
-
-  return conversation;
 }
 
 /**
- * Send an automated match message
- */
-export async function sendMatchMessage(
-  peerAddress: string,
-  ideaName: string,
-  senderType: "investor" | "builder",
-): Promise<void> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
-  }
-
-  const conversation = await startConversation(
-    peerAddress,
-    ideaName,
-    senderType === "investor" ? "investor_interest" : "builder_accept",
-  );
-
-  const message =
-    senderType === "investor"
-      ? `👋 I'm interested in "${ideaName}". I'd love to learn more about your vision and how we can work together.`
-      : `✅ Thanks for your interest in "${ideaName}"! I'd be happy to discuss further. What would you like to know?`;
-
-  await conversation.send(message);
-}
-
-/**
- * Get all conversations
- */
-export async function getAllConversations(): Promise<XMTPConversation[]> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
-  }
-
-  const conversations = await xmtpClient.conversations.list();
-
-  return conversations.map((conv) => ({
-    peerAddress: conv.peerAddress,
-    topic: conv.topic,
-    createdAt: conv.createdAt,
-    context: conv.context,
-  }));
-}
-
-/**
- * Get messages from a conversation
+ * Get all messages from a conversation with a peer
  */
 export async function getMessages(peerAddress: string): Promise<XMTPMessage[]> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
-  }
+  if (!xmtpClient) return [];
 
-  const conversations = await xmtpClient.conversations.list();
-  const conversation = conversations.find((c) => c.peerAddress === peerAddress);
+  const dm = await getOrCreateDm(peerAddress);
+  if (!dm) return [];
 
-  if (!conversation) {
+  try {
+    const messages = await dm.messages();
+    return messages.map((msg) => ({
+      id: msg.id,
+      senderAddress: msg.senderInboxId || "",
+      content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+      sent: new Date(msg.sentAtNs ? Number(msg.sentAtNs) / 1e6 : Date.now()),
+      isFromMe: msg.senderInboxId === xmtpClient?.inboxId,
+    }));
+  } catch (e) {
+    console.error("getMessages error:", e);
     return [];
   }
-
-  const messages = await conversation.messages();
-
-  return messages.map((msg) => ({
-    id: msg.id,
-    senderAddress: msg.senderAddress,
-    content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-    sent: msg.sent,
-    isFromMe: msg.senderAddress === xmtpClient?.address,
-  }));
 }
 
 /**
- * Send a message to a peer
- */
-export async function sendMessage(peerAddress: string, content: string): Promise<void> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
-  }
-
-  const conversations = await xmtpClient.conversations.list();
-  let conversation = conversations.find((c) => c.peerAddress === peerAddress);
-
-  if (!conversation) {
-    conversation = await xmtpClient.conversations.newConversation(peerAddress);
-  }
-
-  await conversation.send(content);
-}
-
-/**
- * Stream messages from a conversation
+ * Stream messages from a conversation in real-time
  */
 export async function streamMessages(
   peerAddress: string,
   callback: (message: XMTPMessage) => void,
 ): Promise<() => void> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
+  const dm = await getOrCreateDm(peerAddress);
+  if (!dm) return () => {};
+
+  try {
+    const stream = await dm.stream();
+    const abortController = new AbortController();
+
+    (async () => {
+      try {
+        for await (const message of stream) {
+          if (abortController.signal.aborted) break;
+          callback({
+            id: message.id,
+            senderAddress: message.senderInboxId || "",
+            content:
+              typeof message.content === "string"
+                ? message.content
+                : JSON.stringify(message.content),
+            sent: new Date(
+              message.sentAtNs ? Number(message.sentAtNs) / 1e6 : Date.now(),
+            ),
+            isFromMe: message.senderInboxId === xmtpClient?.inboxId,
+          });
+        }
+      } catch {
+        // Stream ended
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  } catch {
+    return () => {};
   }
-
-  const conversations = await xmtpClient.conversations.list();
-  const conversation = conversations.find((c) => c.peerAddress === peerAddress);
-
-  if (!conversation) {
-    throw new Error("Conversation not found");
-  }
-
-  const stream = await conversation.streamMessages();
-
-  (async () => {
-    for await (const message of stream) {
-      callback({
-        id: message.id,
-        senderAddress: message.senderAddress,
-        content:
-          typeof message.content === "string" ? message.content : JSON.stringify(message.content),
-        sent: message.sent,
-        isFromMe: message.senderAddress === xmtpClient?.address,
-      });
-    }
-  })();
-
-  return () => {
-    void stream.return();
-  };
 }
 
 /**
  * Stream all new conversations
  */
 export async function streamConversations(
-  callback: (conversation: XMTPConversation) => void,
+  callback: (peerAddress: string) => void,
 ): Promise<() => void> {
-  if (!xmtpClient) {
-    throw new Error("XMTP client not initialized");
+  if (!xmtpClient) return () => {};
+
+  try {
+    const stream = await xmtpClient.conversations.stream();
+    const abortController = new AbortController();
+
+    (async () => {
+      try {
+        for await (const conversation of stream) {
+          if (abortController.signal.aborted) break;
+          const members = await conversation.members;
+          for (const m of members) {
+            for (const addr of m.addresses) {
+              if (addr.toLowerCase() !== xmtpClient?.accountAddress?.toLowerCase()) {
+                callback(addr);
+              }
+            }
+          }
+        }
+      } catch {
+        // Stream ended
+      }
+    })();
+
+    return () => abortController.abort();
+  } catch {
+    return () => {};
   }
-
-  const stream = await xmtpClient.conversations.stream();
-
-  (async () => {
-    for await (const conversation of stream) {
-      callback({
-        peerAddress: conversation.peerAddress,
-        topic: conversation.topic,
-        createdAt: conversation.createdAt,
-        context: conversation.context,
-      });
-    }
-  })();
-
-  return () => {
-    void stream.return();
-  };
 }

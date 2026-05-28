@@ -11,8 +11,8 @@ import {
   ChevronRight,
   Bookmark,
 } from "lucide-react";
-import type { Idea } from "@/lib/nexis/ideasStore";
-import { isIdeaSaved, toggleSavedIdea } from "@/lib/nexis/ideasStore";
+import type { Idea } from "@/hooks/useNexisData";
+import { useNexisData } from "@/hooks/useNexisData";
 
 interface IdeaExpandViewProps {
   idea: Idea | null;
@@ -34,17 +34,13 @@ export function IdeaExpandView({
   onFounderClick,
 }: IdeaExpandViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    if (idea) setSaved(isIdeaSaved(idea.id));
-  }, [idea]);
+  const { isIdeaSaved, toggleSaved } = useNexisData();
+  const saved = idea ? isIdeaSaved(idea.id) : false;
 
   if (!idea) return null;
 
-  const handleToggleSave = () => {
-    const nowSaved = toggleSavedIdea(idea.id);
-    setSaved(nowSaved);
+  const handleToggleSave = async () => {
+    await toggleSaved(idea.id);
     onSavedChange?.();
   };
 

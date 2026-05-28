@@ -10,6 +10,8 @@ import {
 import { PrivyProvider } from "@privy-io/react-auth";
 import { WagmiProvider } from "wagmi";
 import { wagmiConfig, mantleTestnet } from "@/lib/web3/config";
+import { NexisDataProvider } from "@/hooks/useNexisData";
+import { NexisCursor } from "@/components/nexis/NexisCursor";
 
 import appCss from "../styles.css?url";
 
@@ -186,7 +188,10 @@ function RootComponent() {
     >
       <QueryClientProvider client={queryClient}>
         <WagmiProvider config={wagmiConfig}>
-          <Outlet />
+          <NexisDataProvider>
+            <NexisCursor />
+            <Outlet />
+          </NexisDataProvider>
         </WagmiProvider>
       </QueryClientProvider>
     </PrivyProvider>

@@ -6,8 +6,8 @@ import { WrongNetworkBanner } from "./NetworkGuard";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsVerifiedBuilder } from "@/lib/web3/hooks";
-import { getProfile, getInitials, shortAddress, type UserProfile } from "@/lib/nexis/profileStore";
-import { getMatches, getIdeas, type Idea } from "@/lib/nexis/ideasStore";
+import { useNexisData, type Idea } from "@/hooks/useNexisData";
+import { getInitials, shortAddress } from "@/lib/tableland/profiles";
 
 const navItems = [
   { to: "/feed", label: "Swipe", icon: Layers, testId: "nav-feed" },
@@ -29,42 +29,25 @@ export function AppShell({
   const navigate = useNavigate();
   const { isAuthenticated, walletAddress, balance, login, logout, isLoading } = useAuth();
   const { data: isVerifiedOnChain } = useIsVerifiedBuilder(walletAddress || undefined);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [unreadMatches, setUnreadMatches] = useState(0);
+  const { myProfile: profile, matches, ideas: allIdeas, tablesReady } = useNexisData();
+  const unreadMatches = useMemo(() => matches.filter((m) => m.unread).length, [matches]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const [allIdeas, setAllIdeas] = useState<Idea[]>([]);
-
-  useEffect(() => {
-    setProfile(getProfile(walletAddress));
-    setUnreadMatches(getMatches().filter((m) => m.unread).length);
-    setAllIdeas(getIdeas());
-
-    // Refresh on route changes & storage events
-    const onStorage = () => {
-      setProfile(getProfile(walletAddress));
-      setUnreadMatches(getMatches().filter((m) => m.unread).length);
-      setAllIdeas(getIdeas());
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [walletAddress, pathname]);
 
   // Auto-redirect new wallets (no local profile + not verified on-chain) to onboarding
-  // so they pick a role before landing in builder/investor flows.
   useEffect(() => {
     if (!isAuthenticated || !walletAddress) return;
-    const onAuthRoute = pathname === "/onboarding" || pathname === "/";
+    const onAuthRoute = pathname === "/onboarding" || pathname === "/" || pathname === "/setup";
     if (onAuthRoute) return;
-    const localProfile = getProfile(walletAddress);
-    if (localProfile) return; // already onboarded
-    if (isVerifiedOnChain) return; // on-chain verified builder (legacy/external) — let them in
+    if (!tablesReady) return; // tables not yet set up
+    if (profile) return; // already onboarded
+    if (isVerifiedOnChain) return;
     navigate({ to: "/onboarding" });
-  }, [isAuthenticated, walletAddress, pathname, isVerifiedOnChain, navigate]);
+  }, [isAuthenticated, walletAddress, pathname, isVerifiedOnChain, navigate, profile, tablesReady]);
 
   const initials = getInitials(profile, walletAddress);
-  const recentMatches = useMemo(() => getMatches().slice(0, 5), [unreadMatches]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recentMatches = useMemo(() => matches.slice(0, 5), [matches]);
   const searchResults = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return [] as Idea[];

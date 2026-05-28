@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AppShell } from "@/components/nexis/AppShell";
 import { SwipeDeck } from "@/components/nexis/SwipeDeck";
-import { Flame, Clock, X } from "lucide-react";
-import { getUnswipedIdeas, type Idea } from "@/lib/nexis/ideasStore";
-import { filterExpiredIdeas } from "@/lib/nexis/expiry";
+import { Flame, Clock, X, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useNexisData } from "@/hooks/useNexisData";
+import { filterExpiredIdeas } from "@/lib/nexis/expiry";
 
 export const Route = createFileRoute("/feed")({
   component: FeedPage,
@@ -17,16 +17,15 @@ const industryFilters = ["DeFi", "AI", "RWA", "Consumer", "Gaming", "Infra", "De
 
 function FeedPage() {
   const { walletAddress } = useAuth();
-  const [allIdeas, setAllIdeas] = useState<Idea[]>([]);
+  const { getUnswipedIdeas, loading, tablesReady, refreshIdeas } = useNexisData();
   const [sort, setSort] = useState<SortKey>("trending");
   const [industry, setIndustry] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Load when wallet or after swipe
-  useEffect(() => {
-    const list = filterExpiredIdeas(getUnswipedIdeas(walletAddress));
-    setAllIdeas(list);
-  }, [walletAddress, refreshKey]);
+  // Get unswiped ideas from Tableland cache (excludes user's own ideas)
+  const allIdeas = useMemo(
+    () => filterExpiredIdeas(getUnswipedIdeas(walletAddress ?? undefined)),
+    [getUnswipedIdeas, walletAddress],
+  );
 
   const filtered = useMemo(() => {
     let list = allIdeas;
@@ -107,7 +106,7 @@ function FeedPage() {
           })}
         </div>
 
-        <SwipeDeck ideas={filtered} onChanged={() => setRefreshKey((k) => k + 1)} />
+        <SwipeDeck ideas={filtered} onChanged={() => refreshIdeas()} />
       </div>
     </AppShell>
   );

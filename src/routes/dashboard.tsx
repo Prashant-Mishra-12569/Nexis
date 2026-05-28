@@ -16,13 +16,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useBuyBoost, generateIdeaId, useIsVerifiedBuilder } from "@/lib/web3/hooks";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  getIdeasByOwner,
-  getIdeaSentiment,
-  getIdeaViews,
-  getMatches,
+  useNexisData,
   type Idea,
-} from "@/lib/nexis/ideasStore";
-import { getProfile, type UserProfile } from "@/lib/nexis/profileStore";
+  type UserProfile,
+} from "@/hooks/useNexisData";
 import { formatExpiryText, getDaysRemaining } from "@/lib/nexis/expiry";
 import { NetworkGuard } from "@/components/nexis/NetworkGuard";
 
@@ -46,35 +43,31 @@ function DashboardPage() {
   const { isAuthenticated, walletAddress, login, isOnMantle } = useAuth();
   const { data: isVerified } = useIsVerifiedBuilder(walletAddress || undefined);
   const { buyBoost, isPending, isConfirming, isSuccess, error: boostError } = useBuyBoost();
+  const { myProfile: profile, matches, getIdeasByOwner, getIdeaSentiment } = useNexisData();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [ownerIdeas, setOwnerIdeas] = useState<Idea[]>([]);
   const [totals, setTotals] = useState({ views: 0, likes: 0, dislikes: 0, matches: 0 });
 
-  const refresh = () => {
+  const refresh = async () => {
     if (!walletAddress) {
       setOwnerIdeas([]);
       setTotals({ views: 0, likes: 0, dislikes: 0, matches: 0 });
       return;
     }
-    const own = getIdeasByOwner(walletAddress);
+    const own = await getIdeasByOwner(walletAddress);
     setOwnerIdeas(own);
-    const t = own.reduce(
-      (acc, idea) => {
-        const s = getIdeaSentiment(idea.id);
-        acc.likes += s.likes;
-        acc.dislikes += s.dislikes;
-        acc.views += getIdeaViews(idea.id);
-        return acc;
-      },
-      { views: 0, likes: 0, dislikes: 0 },
-    );
-    const matchCount = getMatches().filter((m) => own.some((idea) => idea.id === m.ideaId)).length;
-    setTotals({ ...t, matches: matchCount });
-    setProfile(getProfile(walletAddress));
+    let views = 0, likes = 0, dislikes = 0;
+    for (const idea of own) {
+      const s = await getIdeaSentiment(idea.id);
+      likes += s.likes;
+      dislikes += s.dislikes;
+      views += s.views;
+    }
+    const matchCount = matches.filter((m) => own.some((idea) => idea.id === m.ideaId)).length;
+    setTotals({ views, likes, dislikes, matches: matchCount });
   };
 
-  useEffect(refresh, [walletAddress]);
+  useEffect(() => { refresh(); }, [walletAddress, matches]);
   useEffect(() => {
     if (isSuccess) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -16,7 +16,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { usePayOnboarding, useIsVerifiedBuilder } from "@/lib/web3/hooks";
 import { uploadFileToPinata } from "@/lib/web3/pinata";
-import { getProfile, saveProfile, type UserProfile } from "@/lib/nexis/profileStore";
+import { useNexisData, type UserProfile } from "@/hooks/useNexisData";
 import { NetworkGuard, WrongNetworkBanner } from "@/components/nexis/NetworkGuard";
 
 export const Route = createFileRoute("/onboarding")({
@@ -58,6 +58,10 @@ function OnboardingPage() {
   const { isAuthenticated, walletAddress, login, isOnMantle } = useAuth();
   const { payOnboarding, isPending, isConfirming, isSuccess, error } = usePayOnboarding();
   const { data: isVerified } = useIsVerifiedBuilder(walletAddress || undefined);
+  const { myProfile: existingProfile, saveProfile: saveProfileTL, tablesReady } = useNexisData();
+
+  // Role is PERMANENTLY locked once set
+  const roleLocked = !!existingProfile?.role;
 
   const [role, setRole] = useState<"builder" | "investor" | null>(null);
   const [step, setStep] = useState(0);
@@ -65,6 +69,7 @@ function OnboardingPage() {
   const [ticket, setTicket] = useState(tickets[1]);
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const [formData, setFormData] = useState<FormData>({
     name: "",
@@ -78,28 +83,26 @@ function OnboardingPage() {
     pitchVideoUrl: null,
   });
 
-  // Load existing profile if any
+  // Load existing profile if any (from Tableland)
   useEffect(() => {
-    if (!walletAddress) return;
-    const existing = getProfile(walletAddress);
-    if (!existing) return;
-    setRole(existing.role);
+    if (!existingProfile) return;
+    setRole(existingProfile.role);
     setFormData({
-      name: existing.name || "",
-      location: existing.location || "",
-      linkedin: existing.linkedin || "",
-      twitter: existing.twitter || "",
-      github: existing.role === "builder" ? existing.github || "" : "",
-      firmName: existing.role === "investor" ? existing.firmName || "" : "",
-      thesis: existing.role === "investor" ? existing.thesis || "" : "",
-      profilePicUrl: existing.profilePicUrl,
-      pitchVideoUrl: existing.role === "builder" ? existing.pitchVideoUrl : null,
+      name: existingProfile.name || "",
+      location: existingProfile.location || "",
+      linkedin: existingProfile.linkedin || "",
+      twitter: existingProfile.twitter || "",
+      github: existingProfile.role === "builder" ? existingProfile.github || "" : "",
+      firmName: existingProfile.role === "investor" ? existingProfile.firmName || "" : "",
+      thesis: existingProfile.role === "investor" ? existingProfile.thesis || "" : "",
+      profilePicUrl: existingProfile.profilePicUrl,
+      pitchVideoUrl: existingProfile.role === "builder" ? existingProfile.pitchVideoUrl : null,
     });
-    if (existing.role === "investor") {
-      setTags(existing.industries || []);
-      setTicket(existing.ticketSize || tickets[1]);
+    if (existingProfile.role === "investor") {
+      setTags(existingProfile.industries || []);
+      setTicket(existingProfile.ticketSize || tickets[1]);
     }
-  }, [walletAddress]);
+  }, [existingProfile]);
 
   // After on-chain onboarding tx succeeds, persist verified flag + navigate
   useEffect(() => {
@@ -112,15 +115,13 @@ function OnboardingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuccess, isVerified, walletAddress]);
 
-  // Edit-mode safety net: if user lands on /onboarding?edit=true but has no profile, route them to standard onboarding
+  // Edit-mode safety net
   useEffect(() => {
-    if (!isEditing) return;
-    if (!walletAddress) return;
-    const existing = getProfile(walletAddress);
-    if (!existing) {
+    if (!isEditing || !walletAddress) return;
+    if (!existingProfile) {
       navigate({ to: "/onboarding", search: {} as { edit?: boolean } });
     }
-  }, [isEditing, walletAddress, navigate]);
+  }, [isEditing, walletAddress, navigate, existingProfile]);
 
   const steps =
     role === "builder"
@@ -162,10 +163,11 @@ function OnboardingPage() {
       github: formData.github || undefined,
       profilePicUrl: formData.profilePicUrl,
       pitchVideoUrl: formData.pitchVideoUrl,
-      joinedAt: Date.now(),
+      joinedAt: existingProfile?.joinedAt || Date.now(),
       isVerified: verified,
     };
-    saveProfile(profile);
+    setSaving(true);
+    saveProfileTL(profile).catch(console.error).finally(() => setSaving(false));
   }
 
   function persistInvestorProfile() {
@@ -182,9 +184,10 @@ function OnboardingPage() {
       twitter: formData.twitter,
       location: formData.location,
       profilePicUrl: formData.profilePicUrl,
-      joinedAt: Date.now(),
+      joinedAt: existingProfile?.joinedAt || Date.now(),
     };
-    saveProfile(profile);
+    setSaving(true);
+    saveProfileTL(profile).catch(console.error).finally(() => setSaving(false));
   }
 
   const handlePayAndEnter = async () => {
@@ -248,8 +251,8 @@ function OnboardingPage() {
                 setStep(step - 1);
                 return;
               }
-              // In edit mode, role is locked — bail to profile instead of unrolling to picker
-              if (isEditing) {
+              // Role is PERMANENTLY locked once set — bail to profile
+              if (isEditing || roleLocked) {
                 navigate({ to: "/profile" });
                 return;
               }
@@ -259,7 +262,7 @@ function OnboardingPage() {
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-white"
           >
             <ChevronLeft className="h-4 w-4" />
-            {step === 0 && isEditing ? "Cancel" : "Back"}
+            {step === 0 && (isEditing || roleLocked) ? "Cancel" : "Back"}
           </button>
         )}
       </header>

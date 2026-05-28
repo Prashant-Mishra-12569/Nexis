@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { X, Linkedin, Twitter, Github, ExternalLink, Wallet, MapPin } from "lucide-react";
+import { X, Linkedin, Twitter, Github, ExternalLink, Wallet, MapPin, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getProfile, getInitials, shortAddress, type UserProfile } from "@/lib/nexis/profileStore";
-import { getIdeasByOwner, type Idea } from "@/lib/nexis/ideasStore";
+import { useNexisData, type Idea } from "@/hooks/useNexisData";
+import { getInitials, shortAddress, type UserProfile } from "@/lib/tableland/profiles";
 
 interface PublicProfileModalProps {
   walletAddress: string | null;
@@ -11,12 +11,13 @@ interface PublicProfileModalProps {
 
 /**
  * Drawer that shows the public face of any wallet — used when an investor
- * taps a founder's username on the swipe card or in chat. Pulls from the
- * per-wallet profile store + their on-chain listings.
+ * taps a founder's username on the swipe card or in chat. Pulls from Tableland.
  */
 export function PublicProfileModal({ walletAddress, onClose }: PublicProfileModalProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { getProfile: fetchProfile, getIdeasByOwner } = useNexisData();
 
   useEffect(() => {
     if (!walletAddress) {
@@ -24,9 +25,15 @@ export function PublicProfileModal({ walletAddress, onClose }: PublicProfileModa
       setIdeas([]);
       return;
     }
-    setProfile(getProfile(walletAddress));
-    setIdeas(getIdeasByOwner(walletAddress));
-  }, [walletAddress]);
+    setLoading(true);
+    Promise.all([fetchProfile(walletAddress), getIdeasByOwner(walletAddress)])
+      .then(([p, i]) => {
+        setProfile(p);
+        setIdeas(i);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [walletAddress, fetchProfile, getIdeasByOwner]);
 
   const isOpen = !!walletAddress;
   const initials = getInitials(profile, walletAddress);

@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as FeedRouteImport } from './routes/feed'
@@ -17,6 +18,11 @@ import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardNewIdeaRouteImport } from './routes/dashboard_.new-idea'
 
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/setup': typeof SetupRoute
   '/dashboard/new-idea': typeof DashboardNewIdeaRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/setup': typeof SetupRoute
   '/dashboard/new-idea': typeof DashboardNewIdeaRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/feed': typeof FeedRoute
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
+  '/setup': typeof SetupRoute
   '/dashboard_/new-idea': typeof DashboardNewIdeaRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/feed'
     | '/onboarding'
     | '/profile'
+    | '/setup'
     | '/dashboard/new-idea'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/feed'
     | '/onboarding'
     | '/profile'
+    | '/setup'
     | '/dashboard/new-idea'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/feed'
     | '/onboarding'
     | '/profile'
+    | '/setup'
     | '/dashboard_/new-idea'
   fileRoutesById: FileRoutesById
 }
@@ -118,11 +130,19 @@ export interface RootRouteChildren {
   FeedRoute: typeof FeedRoute
   OnboardingRoute: typeof OnboardingRoute
   ProfileRoute: typeof ProfileRoute
+  SetupRoute: typeof SetupRoute
   DashboardNewIdeaRoute: typeof DashboardNewIdeaRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeedRoute: FeedRoute,
   OnboardingRoute: OnboardingRoute,
   ProfileRoute: ProfileRoute,
+  SetupRoute: SetupRoute,
   DashboardNewIdeaRoute: DashboardNewIdeaRoute,
 }
 export const routeTree = rootRouteImport

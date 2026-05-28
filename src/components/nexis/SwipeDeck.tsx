@@ -1,17 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence, PanInfo } from "framer-motion";
-import { X, Check, Star, Sparkles, RefreshCw, Bookmark } from "lucide-react";
-import {
-  getUnswipedIdeas,
-  saveSwipe,
-  resetToDefaults,
-  incrementIdeaView,
-  isIdeaSaved,
-  toggleSavedIdea,
-  type Idea,
-} from "@/lib/nexis/ideasStore";
+import { X, Check, Star, Sparkles, RefreshCw, Bookmark, Loader2 } from "lucide-react";
 import { IdeaExpandView } from "./IdeaExpandView";
 import { useAuth } from "@/hooks/useAuth";
+import { useNexisData, type Idea } from "@/hooks/useNexisData";
 import { PublicProfileModal } from "./PublicProfileModal";
 
 function Card({
@@ -115,11 +107,21 @@ interface SwipeDeckProps {
 export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
   const controlled = externalIdeas !== undefined;
   const { walletAddress } = useAuth();
+  const {
+    getUnswipedIdeas,
+    saveSwipe: saveSwipeTL,
+    toggleSaved,
+    isIdeaSaved,
+    refreshIdeas,
+    tablesReady,
+  } = useNexisData();
+
   const [internalIdeas, setInternalIdeas] = useState<Idea[]>([]);
   const [index, setIndex] = useState(0);
   const [expandedIdea, setExpandedIdea] = useState<Idea | null>(null);
   const [profileWallet, setProfileWallet] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState<"saved" | "unsaved" | null>(null);
+  const [swiping, setSwiping] = useState(false);
   const viewedRef = useRef<Set<string>>(new Set());
 
   const ideas = controlled ? externalIdeas! : internalIdeas;
@@ -129,7 +131,7 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
     if (!controlled) {
       setInternalIdeas(getUnswipedIdeas());
     }
-  }, [controlled]);
+  }, [controlled, getUnswipedIdeas]);
 
   // Reset index when controlled list changes shape
   useEffect(() => {
@@ -140,41 +142,67 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
   const next = ideas[index + 1];
   const hasIdeas = ideas.length > 0 && index < ideas.length;
 
-  // Track view of current idea (only once per session per idea)
-  useEffect(() => {
-    if (!current) return;
-    if (viewedRef.current.has(current.id)) return;
-    viewedRef.current.add(current.id);
-    incrementIdeaView(current.id);
-  }, [current]);
+  const currentSaved = current ? isIdeaSaved(current.id) : false;
 
-  function swipe(dir: "left" | "right") {
-    if (!current) return;
-    saveSwipe(current.id, dir === "right", walletAddress);
-    setIndex((i) => i + 1);
-    onChanged?.();
-  }
+  const swipe = useCallback(
+    async (dir: "left" | "right") => {
+      if (!current || swiping) return;
+      setSwiping(true);
+      try {
+        await saveSwipeTL(current.id, dir === "right");
+        setIndex((i) => i + 1);
+        onChanged?.();
+      } catch (e) {
+        console.error("Swipe failed:", e);
+      } finally {
+        setSwiping(false);
+      }
+    },
+    [current, swiping, saveSwipeTL, onChanged],
+  );
 
   function handleTap() {
     if (current) setExpandedIdea(current);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!current) return;
-    const nowSaved = toggleSavedIdea(current.id);
-    setSavedFlash(nowSaved ? "saved" : "unsaved");
-    onChanged?.();
-    setTimeout(() => setSavedFlash(null), 1200);
+    try {
+      const nowSaved = await toggleSaved(current.id);
+      setSavedFlash(nowSaved ? "saved" : "unsaved");
+      onChanged?.();
+      setTimeout(() => setSavedFlash(null), 1200);
+    } catch (e) {
+      console.error("Save failed:", e);
+    }
   }
 
-  const currentSaved = current ? isIdeaSaved(current.id) : false;
-
-  function handleReset() {
-    resetToDefaults();
+  async function handleReset() {
     viewedRef.current.clear();
+    await refreshIdeas();
     if (!controlled) setInternalIdeas(getUnswipedIdeas());
     setIndex(0);
     onChanged?.();
+  }
+
+  if (!tablesReady) {
+    return (
+      <div className="w-full max-w-md mx-auto flex flex-col items-center gap-6 py-20">
+        <div className="glass-strong rounded-3xl p-8 text-center neon-border">
+          <Loader2 className="h-12 w-12 text-[var(--neon)] mx-auto mb-4 animate-spin" />
+          <h3 className="font-display text-2xl font-bold mb-2">Setting up…</h3>
+          <p className="text-muted-foreground text-sm mb-4">
+            Tableland tables need to be created first.
+          </p>
+          <a
+            href="/setup"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[var(--neon)] text-black font-semibold hover:scale-105 transition-all"
+          >
+            Go to Setup →
+          </a>
+        </div>
+      </div>
+    );
   }
 
   if (!hasIdeas) {
@@ -188,7 +216,7 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
           <h3 className="font-display text-2xl font-bold mb-2">You've seen everything!</h3>
           <p className="text-muted-foreground text-sm mb-6">
             {ideas.length === 0
-              ? "No ideas match your current filter. Try clearing it or seeding fresh ideas below."
+              ? "No ideas in the feed yet. Builders need to list their startups first."
               : "Check back later for new startups or refresh the feed."}
           </p>
           <button
@@ -197,7 +225,7 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
             className="flex items-center gap-2 mx-auto px-6 py-3 rounded-full bg-[var(--neon)] text-black font-semibold hover:scale-105 transition-all"
           >
             <RefreshCw className="h-4 w-4" />
-            Reset Feed
+            Refresh Feed
           </button>
         </div>
       </div>
@@ -238,11 +266,16 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
         <div className="flex items-center gap-4">
           <button
             onClick={() => swipe("left")}
+            disabled={swiping}
             data-testid="swipe-left-btn"
-            className="h-14 w-14 rounded-full glass-strong grid place-content-center transition-all duration-300 hover:scale-105 hover:shadow-[0_0_24px_rgba(244,63,94,0.6)] hover:border-rose-500/60 active:scale-95"
+            className="h-14 w-14 rounded-full glass-strong grid place-content-center transition-all duration-300 hover:scale-105 hover:shadow-[0_0_24px_rgba(244,63,94,0.6)] hover:border-rose-500/60 active:scale-95 disabled:opacity-50"
             aria-label="Pass"
           >
-            <X className="h-6 w-6 text-rose-400" strokeWidth={2.5} />
+            {swiping ? (
+              <Loader2 className="h-5 w-5 animate-spin text-rose-400" />
+            ) : (
+              <X className="h-6 w-6 text-rose-400" strokeWidth={2.5} />
+            )}
           </button>
           <button
             onClick={handleSave}
@@ -269,11 +302,16 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
           </button>
           <button
             onClick={() => swipe("right")}
+            disabled={swiping}
             data-testid="swipe-right-btn"
-            className="h-14 w-14 rounded-full grid place-content-center bg-[var(--neon)] text-black transition-all duration-300 hover:scale-105 neon-glow active:scale-95"
+            className="h-14 w-14 rounded-full grid place-content-center bg-[var(--neon)] text-black transition-all duration-300 hover:scale-105 neon-glow active:scale-95 disabled:opacity-50"
             aria-label="Like"
           >
-            <Check className="h-6 w-6" strokeWidth={3} />
+            {swiping ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Check className="h-6 w-6" strokeWidth={3} />
+            )}
           </button>
         </div>
         {savedFlash && (

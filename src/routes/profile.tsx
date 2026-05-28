@@ -14,16 +14,8 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { getProfile, getInitials, shortAddress, type UserProfile } from "@/lib/nexis/profileStore";
-import {
-  getIdeasByOwner,
-  getReceivedRightSwipes,
-  getMatches,
-  getSavedIdeas,
-  toggleSavedIdea,
-  type Idea,
-  type Match,
-} from "@/lib/nexis/ideasStore";
+import { useNexisData, type Idea, type Match } from "@/hooks/useNexisData";
+import { getInitials, shortAddress } from "@/lib/tableland/profiles";
 import { useIsVerifiedBuilder } from "@/lib/web3/hooks";
 import { useEffect, useState } from "react";
 
@@ -34,7 +26,16 @@ export const Route = createFileRoute("/profile")({
 function ProfilePage() {
   const { isAuthenticated, walletAddress, balance, login, isLoading } = useAuth();
   const { data: isVerifiedOnChain } = useIsVerifiedBuilder(walletAddress || undefined);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const {
+    myProfile: profile,
+    matches,
+    ideas,
+    getIdeasByOwner,
+    getSavedIdeas,
+    toggleSaved,
+    getIdeaSentiment,
+  } = useNexisData();
+
   const [ownerIdeas, setOwnerIdeas] = useState<Idea[]>([]);
   const [rightSwipes, setRightSwipes] = useState(0);
   const [matchCount, setMatchCount] = useState(0);
@@ -42,28 +43,31 @@ function ProfilePage() {
   const [savedIdeas, setSavedIdeas] = useState<Idea[]>([]);
   const [copied, setCopied] = useState(false);
 
-  const loadAll = () => {
+  const loadAll = async () => {
     if (!walletAddress) {
-      setProfile(null);
       setOwnerIdeas([]);
       setRightSwipes(0);
       setMatchCount(0);
       setSavedIdeas([]);
       return;
     }
-    setProfile(getProfile(walletAddress));
-    setOwnerIdeas(getIdeasByOwner(walletAddress));
-    setRightSwipes(getReceivedRightSwipes(walletAddress));
-    const allMatches = getMatches();
-    setMatchCount(allMatches.length);
-    setDealMatches(allMatches);
+    const own = await getIdeasByOwner(walletAddress);
+    setOwnerIdeas(own);
+    let totalLikes = 0;
+    for (const idea of own) {
+      const s = await getIdeaSentiment(idea.id);
+      totalLikes += s.likes;
+    }
+    setRightSwipes(totalLikes);
+    setMatchCount(matches.length);
+    setDealMatches(matches);
     setSavedIdeas(getSavedIdeas());
   };
 
-  useEffect(loadAll, [walletAddress]);
+  useEffect(() => { loadAll(); }, [walletAddress, matches, ideas]);
 
-  const handleUnsave = (ideaId: string) => {
-    toggleSavedIdea(ideaId);
+  const handleUnsave = async (ideaId: string) => {
+    await toggleSaved(ideaId);
     setSavedIdeas(getSavedIdeas());
   };
 

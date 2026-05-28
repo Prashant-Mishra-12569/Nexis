@@ -4,7 +4,7 @@ import { ArrowRight, Zap, Wallet, Sparkles, Layers, Heart, Rocket, LogOut } from
 import { Orbs } from "@/components/nexis/Orbs";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { getIdeas, getMatches } from "@/lib/nexis/ideasStore";
+import { useNexisData } from "@/hooks/useNexisData";
 
 export const Route = createFileRoute("/")({
   component: Landing,
@@ -201,12 +201,10 @@ function Landing() {
 }
 
 function StatsSection() {
+  const { ideas, matches } = useNexisData();
   const [stats, setStats] = useState({ ideas: 0, matches: 0, capital: 0 });
 
   useEffect(() => {
-    const ideas = getIdeas();
-    const matches = getMatches();
-
     // Sum capital across all ideas — accept $K and $M suffixes
     const totalCapital = ideas.reduce((acc, idea) => {
       const raw = idea.ask.replace(/[^0-9.]/g, "");
@@ -220,7 +218,7 @@ function StatsSection() {
       matches: matches.length,
       capital: totalCapital,
     });
-  }, []);
+  }, [ideas, matches]);
 
   const formatCapital = (n: number) => {
     if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
