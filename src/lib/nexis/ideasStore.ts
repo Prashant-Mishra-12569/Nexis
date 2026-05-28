@@ -19,6 +19,7 @@ export interface Idea {
   matchScore: number;
   createdAt: Date;
   pitchDeckUrl?: string;
+  pitchVideoUrl?: string;
   teamMembers?: TeamMember[];
   financials?: Financials;
   linkedIn?: string;
@@ -47,6 +48,77 @@ const MATCHES_KEY = "nexis_matches";
 const VIEWS_KEY = "nexis_idea_views";
 const SENTIMENT_KEY = "nexis_idea_sentiment";
 const SAVED_KEY = "nexis_saved_ideas";
+const MESSAGES_KEY = "nexis_messages";
+
+// ===== Messages model (sender-addressed) =====
+export interface Message {
+  id: string;
+  matchId: string;
+  senderWallet: string;
+  text: string;
+  timestamp: string;
+  type?: "text" | "deal_request" | "deal_confirmed" | "deal_rejected";
+  // For deal_request messages, store the on-chain dealId (for confirmation)
+  dealId?: `0x${string}`;
+  // For deal_request messages, store metadata URI used to mint the NFT
+  tokenURI?: string;
+}
+
+export function getMessages(matchId: string): Message[] {
+  if (typeof window === "undefined") return [];
+  const raw = localStorage.getItem(MESSAGES_KEY);
+  if (!raw) return [];
+  try {
+    const all = JSON.parse(raw) as Record<string, Message[]>;
+    return all[matchId] ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function appendMessage(
+  msg: Omit<Message, "id" | "timestamp"> & { timestamp?: string },
+): Message {
+  const finalMsg: Message = {
+    id: crypto.randomUUID(),
+    timestamp: msg.timestamp ?? new Date().toISOString(),
+    ...msg,
+  };
+  if (typeof window === "undefined") return finalMsg;
+  const raw = localStorage.getItem(MESSAGES_KEY);
+  let all: Record<string, Message[]> = {};
+  try {
+    all = raw ? JSON.parse(raw) : {};
+  } catch {
+    all = {};
+  }
+  all[msg.matchId] = [...(all[msg.matchId] ?? []), finalMsg];
+  localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
+  // Keep match's lastMessage in sync (preview text)
+  updateMatchLastMessage(msg.matchId, msg.text);
+  return finalMsg;
+}
+
+export function patchMessage(matchId: string, messageId: string, patch: Partial<Message>): void {
+  if (typeof window === "undefined") return;
+  const raw = localStorage.getItem(MESSAGES_KEY);
+  if (!raw) return;
+  try {
+    const all = JSON.parse(raw) as Record<string, Message[]>;
+    const list = all[matchId] ?? [];
+    const idx = list.findIndex((m) => m.id === messageId);
+    if (idx < 0) return;
+    list[idx] = { ...list[idx], ...patch };
+    all[matchId] = list;
+    localStorage.setItem(MESSAGES_KEY, JSON.stringify(all));
+  } catch {
+    // noop
+  }
+}
+
+// Only seed demo ideas when explicitly enabled via env flag.
+// Real users start with an empty feed populated by actual on-chain listings.
+const SHOULD_SEED_DEMO = import.meta.env.VITE_SEED_DEMO_IDEAS === "true";
 
 // Default seed ideas for demo
 const defaultIdeas: Idea[] = [
@@ -181,14 +253,15 @@ const defaultIdeas: Idea[] = [
   },
 ];
 
-// Get ideas from localStorage or return defaults
+// Get ideas from localStorage. Demo seed only populates when VITE_SEED_DEMO_IDEAS=true.
 export function getIdeas(): Idea[] {
-  if (typeof window === "undefined") return defaultIdeas;
+  if (typeof window === "undefined") return SHOULD_SEED_DEMO ? defaultIdeas : [];
 
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultIdeas));
-    return defaultIdeas;
+    const initial = SHOULD_SEED_DEMO ? defaultIdeas : [];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
+    return initial;
   }
 
   try {
@@ -198,7 +271,7 @@ export function getIdeas(): Idea[] {
       createdAt: new Date(idea.createdAt),
     }));
   } catch {
-    return defaultIdeas;
+    return SHOULD_SEED_DEMO ? defaultIdeas : [];
   }
 }
 
@@ -237,8 +310,9 @@ export function getSwipes(): { liked: string[]; disliked: string[] } {
   }
 }
 
-// Save swipe action
-export function saveSwipe(ideaId: string, liked: boolean): void {
+// Save swipe action. When `liked`, an investor → builder match is created.
+// Pass the investor's wallet so we can model who initiated the interest.
+export function saveSwipe(ideaId: string, liked: boolean, investorWallet?: string | null): void {
   if (typeof window === "undefined") return;
 
   const swipes = getSwipes();
@@ -258,9 +332,9 @@ export function saveSwipe(ideaId: string, liked: boolean): void {
   // Track aggregate sentiment per idea
   recordSentiment(ideaId, liked);
 
-  // If liked, create a match
-  if (liked) {
-    createMatch(ideaId);
+  // If liked & we know the investor, create a pending match for the builder.
+  if (liked && investorWallet) {
+    createMatch(ideaId, investorWallet);
   }
 }
 
@@ -397,16 +471,30 @@ export function getOwnerTotalViews(walletAddress: string | null | undefined): nu
 }
 
 // Match management
+export type MatchStatus = "pending" | "accepted" | "declined";
+export type DealStatus = "none" | "requested" | "confirmed" | "rejected";
+
 export interface Match {
   id: string;
   ideaId: string;
   ideaName: string;
-  founderName: string;
-  founderAvatar: string;
+  industry?: string;
+  // Builder side (recipient of investor interest)
+  builderName: string;
+  builderAvatar: string;
+  builderWallet: string;
+  // Investor side (initiator)
+  investorWallet: string;
+  investorAvatar?: string;
   matchedAt: Date;
   lastMessage?: string;
   unread: boolean;
-  walletAddress?: string;
+  status: MatchStatus; // pending until builder accepts
+  // Deal-NFT lifecycle (builder requests → investor confirms → NFT minted to builder)
+  dealStatus?: DealStatus;
+  dealId?: `0x${string}`;
+  dealTokenURI?: string;
+  dealTokenId?: number;
 }
 
 export function getMatches(): Match[] {
@@ -426,54 +514,81 @@ export function getMatches(): Match[] {
   }
 }
 
-function createMatch(ideaId: string): void {
-  const ideas = getIdeas();
-  const idea = ideas.find((i) => i.id === ideaId);
-  if (!idea) return;
+/**
+ * Create a match when an INVESTOR swipes right on a builder's idea.
+ * The match shows up in the BUILDER's inbox in pending state until they accept/decline.
+ */
+export function createMatch(ideaId: string, investorWallet: string): Match | null {
+  const idea = getIdeas().find((i) => i.id === ideaId);
+  if (!idea || !idea.walletAddress) return null;
 
   const matches = getMatches();
-
-  // Don't create duplicate match
-  if (matches.some((m) => m.ideaId === ideaId)) return;
+  // Don't create duplicate match between same investor & idea
+  const existing = matches.find(
+    (m) => m.ideaId === ideaId && m.investorWallet.toLowerCase() === investorWallet.toLowerCase(),
+  );
+  if (existing) return existing;
 
   const newMatch: Match = {
     id: crypto.randomUUID(),
     ideaId: idea.id,
     ideaName: idea.name,
-    founderName: idea.founder,
-    founderAvatar: idea.founder.slice(1, 3).toUpperCase(),
+    industry: idea.industry,
+    builderName: idea.founder,
+    builderAvatar: idea.founder.replace("@", "").slice(0, 2).toUpperCase(),
+    builderWallet: idea.walletAddress,
+    investorWallet,
+    investorAvatar: investorWallet.slice(2, 4).toUpperCase(),
     matchedAt: new Date(),
-    lastMessage: `You matched with ${idea.name}!`,
+    lastMessage: `New interest from investor.`,
     unread: true,
-    walletAddress: idea.walletAddress,
+    status: "pending",
+    dealStatus: "none",
   };
 
   matches.unshift(newMatch);
+  if (typeof window !== "undefined") {
+    localStorage.setItem(MATCHES_KEY, JSON.stringify(matches));
+  }
+  return newMatch;
+}
+
+export function getMatchesForWallet(
+  walletAddress: string | null | undefined,
+  role?: "builder" | "investor",
+): Match[] {
+  if (!walletAddress) return [];
+  const lower = walletAddress.toLowerCase();
+  return getMatches().filter((m) => {
+    if (role === "builder") return m.builderWallet?.toLowerCase() === lower;
+    if (role === "investor") return m.investorWallet?.toLowerCase() === lower;
+    return m.builderWallet?.toLowerCase() === lower || m.investorWallet?.toLowerCase() === lower;
+  });
+}
+
+export function updateMatch(matchId: string, patch: Partial<Match>): void {
+  if (typeof window === "undefined") return;
+  const matches = getMatches();
+  const idx = matches.findIndex((m) => m.id === matchId);
+  if (idx < 0) return;
+  matches[idx] = { ...matches[idx], ...patch };
   localStorage.setItem(MATCHES_KEY, JSON.stringify(matches));
 }
 
 export function markMatchRead(matchId: string): void {
-  if (typeof window === "undefined") return;
-  const matches = getMatches();
-  const idx = matches.findIndex((m) => m.id === matchId);
-  if (idx < 0) return;
-  matches[idx] = { ...matches[idx], unread: false };
-  localStorage.setItem(MATCHES_KEY, JSON.stringify(matches));
+  updateMatch(matchId, { unread: false });
+}
+
+export function acceptMatch(matchId: string): void {
+  updateMatch(matchId, { status: "accepted" });
 }
 
 export function declineMatch(matchId: string): void {
-  if (typeof window === "undefined") return;
-  const remaining = getMatches().filter((m) => m.id !== matchId);
-  localStorage.setItem(MATCHES_KEY, JSON.stringify(remaining));
+  updateMatch(matchId, { status: "declined" });
 }
 
 export function updateMatchLastMessage(matchId: string, lastMessage: string): void {
-  if (typeof window === "undefined") return;
-  const matches = getMatches();
-  const idx = matches.findIndex((m) => m.id === matchId);
-  if (idx < 0) return;
-  matches[idx] = { ...matches[idx], lastMessage };
-  localStorage.setItem(MATCHES_KEY, JSON.stringify(matches));
+  updateMatch(matchId, { lastMessage });
 }
 
 // Clear all data (for testing)
@@ -485,6 +600,7 @@ export function clearAllData(): void {
   localStorage.removeItem(VIEWS_KEY);
   localStorage.removeItem(SENTIMENT_KEY);
   localStorage.removeItem(SAVED_KEY);
+  localStorage.removeItem(MESSAGES_KEY);
 }
 
 // Reset to default ideas
@@ -496,4 +612,5 @@ export function resetToDefaults(): void {
   localStorage.removeItem(VIEWS_KEY);
   localStorage.removeItem(SENTIMENT_KEY);
   localStorage.removeItem(SAVED_KEY);
+  localStorage.removeItem(MESSAGES_KEY);
 }

@@ -142,6 +142,7 @@ function DashboardPage() {
             {!isVerified && (
               <Link
                 to="/onboarding"
+                search={{}}
                 data-testid="dashboard-onboard-cta"
                 className="inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full bg-[var(--neon)]/10 text-[var(--neon)] text-xs neon-border hover:bg-[var(--neon)]/20"
               >

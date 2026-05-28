@@ -1,5 +1,5 @@
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { parseEther, keccak256, toBytes } from "viem";
+import { parseEther, keccak256, toBytes, decodeEventLog } from "viem";
 import { NEXIS_FINANCE_ABI, NEXIS_DEAL_NFT_ABI } from "./abis";
 import { CONTRACT_ADDRESSES, FEES, mantleTestnet } from "./config";
 
@@ -175,7 +175,11 @@ export function useBoostDetails(ideaId: `0x${string}` | undefined) {
 export function useRequestDealConfirmation() {
   const { writeContract, data: hash, isPending, error } = useWriteContract();
 
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+  const {
+    isLoading: isConfirming,
+    isSuccess,
+    data: receipt,
+  } = useWaitForTransactionReceipt({
     hash,
   });
 
@@ -194,9 +198,30 @@ export function useRequestDealConfirmation() {
     });
   };
 
+  // Once the receipt arrives, extract dealId from the DealRequested event log
+  let dealId: `0x${string}` | undefined;
+  if (receipt) {
+    for (const log of receipt.logs) {
+      try {
+        const parsed = decodeEventLog({
+          abi: NEXIS_DEAL_NFT_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (parsed.eventName === "DealRequested") {
+          dealId = (parsed.args as { dealId: `0x${string}` }).dealId;
+          break;
+        }
+      } catch {
+        // Not our event, skip
+      }
+    }
+  }
+
   return {
     requestDeal,
     hash,
+    dealId,
     isPending,
     isConfirming,
     isSuccess,

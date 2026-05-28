@@ -20,6 +20,10 @@ import { getProfile, saveProfile, type UserProfile } from "@/lib/nexis/profileSt
 import { NetworkGuard, WrongNetworkBanner } from "@/components/nexis/NetworkGuard";
 
 export const Route = createFileRoute("/onboarding")({
+  validateSearch: (search: Record<string, unknown>): { edit?: boolean } => {
+    const edit = search.edit === "true" || search.edit === true;
+    return edit ? { edit: true } : {};
+  },
   component: OnboardingPage,
 });
 
@@ -50,6 +54,7 @@ interface FormData {
 
 function OnboardingPage() {
   const navigate = useNavigate();
+  const { edit: isEditing = false } = Route.useSearch();
   const { isAuthenticated, walletAddress, login, isOnMantle } = useAuth();
   const { payOnboarding, isPending, isConfirming, isSuccess, error } = usePayOnboarding();
   const { data: isVerified } = useIsVerifiedBuilder(walletAddress || undefined);
@@ -107,9 +112,21 @@ function OnboardingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuccess, isVerified, walletAddress]);
 
+  // Edit-mode safety net: if user lands on /onboarding?edit=true but has no profile, route them to standard onboarding
+  useEffect(() => {
+    if (!isEditing) return;
+    if (!walletAddress) return;
+    const existing = getProfile(walletAddress);
+    if (!existing) {
+      navigate({ to: "/onboarding", search: {} as { edit?: boolean } });
+    }
+  }, [isEditing, walletAddress, navigate]);
+
   const steps =
     role === "builder"
-      ? ["Identity", "Pitch video", "Pay fee"]
+      ? isEditing
+        ? ["Identity", "Pitch video"]
+        : ["Identity", "Pitch video", "Pay fee"]
       : ["Identity", "Thesis", "Preferences"];
 
   function toggle(t: string) {
@@ -180,6 +197,12 @@ function OnboardingPage() {
       setStep(0);
       return;
     }
+    // In edit mode, no on-chain payment needed — just persist & exit.
+    if (isEditing) {
+      persistBuilderProfile(true);
+      navigate({ to: "/profile" });
+      return;
+    }
     if (!isOnMantle) {
       setSubmitError("Please switch to Mantle Sepolia before paying.");
       return;
@@ -201,7 +224,7 @@ function OnboardingPage() {
       return;
     }
     persistInvestorProfile();
-    navigate({ to: "/feed" });
+    navigate({ to: isEditing ? "/profile" : "/feed" });
   };
 
   const update = <K extends keyof FormData>(key: K, value: FormData[K]) =>
@@ -220,18 +243,30 @@ function OnboardingPage() {
         </Link>
         {role && (
           <button
-            onClick={() => (step > 0 ? setStep(step - 1) : setRole(null))}
+            onClick={() => {
+              if (step > 0) {
+                setStep(step - 1);
+                return;
+              }
+              // In edit mode, role is locked — bail to profile instead of unrolling to picker
+              if (isEditing) {
+                navigate({ to: "/profile" });
+                return;
+              }
+              setRole(null);
+            }}
             data-testid="onboarding-back-btn"
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-white"
           >
-            <ChevronLeft className="h-4 w-4" /> Back
+            <ChevronLeft className="h-4 w-4" />
+            {step === 0 && isEditing ? "Cancel" : "Back"}
           </button>
         )}
       </header>
 
       <main className="relative z-10 px-4 py-8 md:py-12 max-w-xl mx-auto">
         <AnimatePresence mode="wait">
-          {!role ? (
+          {!role && !isEditing ? (
             <motion.div
               key="role"
               initial={{ opacity: 0, y: 12 }}
@@ -552,7 +587,15 @@ function OnboardingPage() {
                       Continue <ArrowRight className="h-4 w-4" />
                     </button>
                   ) : role === "builder" ? (
-                    isAuthenticated && !isOnMantle && !isSuccess && !isVerified ? (
+                    isEditing ? (
+                      <button
+                        onClick={handlePayAndEnter}
+                        data-testid="onboard-save-btn"
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-105 active:scale-95 transition-all"
+                      >
+                        Save changes <Check className="h-4 w-4" />
+                      </button>
+                    ) : isAuthenticated && !isOnMantle && !isSuccess && !isVerified ? (
                       <NetworkGuard>
                         <></>
                       </NetworkGuard>
@@ -593,7 +636,15 @@ function OnboardingPage() {
                       data-testid="onboard-investor-finish-btn"
                       className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-[var(--neon)] text-black font-semibold neon-glow hover:scale-105 active:scale-95 transition-all"
                     >
-                      Enter Nexis <ArrowRight className="h-4 w-4" />
+                      {isEditing ? (
+                        <>
+                          Save changes <Check className="h-4 w-4" />
+                        </>
+                      ) : (
+                        <>
+                          Enter Nexis <ArrowRight className="h-4 w-4" />
+                        </>
+                      )}
                     </button>
                   )}
                 </div>

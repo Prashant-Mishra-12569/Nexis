@@ -204,6 +204,7 @@ function ProfilePage() {
                 )}
                 <Link
                   to="/onboarding"
+                  search={{ edit: true }}
                   data-testid="profile-edit-btn"
                   className="h-8 px-3 rounded-full glass flex items-center gap-1.5 hover:neon-border transition-all text-xs"
                 >
@@ -387,7 +388,7 @@ function ProfilePage() {
                 >
                   <Award className="h-7 w-7 text-[var(--neon)]" />
                   <div className="mt-4 font-display font-bold">Nexis Match · {m.ideaName}</div>
-                  <div className="text-xs text-muted-foreground mt-1">{m.founderName}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{m.builderName}</div>
                   <div className="text-[10px] text-[var(--neon)] mt-3 font-mono">
                     Soulbound · Mantle Sepolia
                   </div>

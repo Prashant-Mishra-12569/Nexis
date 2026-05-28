@@ -20,6 +20,7 @@ interface IdeaExpandViewProps {
   onClose: () => void;
   onSwipeRight?: () => void;
   onSavedChange?: () => void;
+  onFounderClick?: (wallet: string) => void;
 }
 
 type TabType = "overview" | "team" | "financials";
@@ -30,6 +31,7 @@ export function IdeaExpandView({
   onClose,
   onSwipeRight,
   onSavedChange,
+  onFounderClick,
 }: IdeaExpandViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [saved, setSaved] = useState(false);
@@ -82,7 +84,14 @@ export function IdeaExpandView({
             <div className="px-5 pb-4 border-b border-white/10">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="text-[var(--neon)] text-sm font-medium">{idea.founder}</div>
+                  <button
+                    type="button"
+                    onClick={() => idea.walletAddress && onFounderClick?.(idea.walletAddress)}
+                    data-testid="expand-founder-link-mobile"
+                    className="text-[var(--neon)] text-sm font-medium hover:underline"
+                  >
+                    {idea.founder}
+                  </button>
                   <h2 className="font-display text-2xl font-bold mt-1">{idea.name}</h2>
                   <p className="text-sm text-muted-foreground mt-1">{idea.tagline}</p>
                 </div>
@@ -162,7 +171,14 @@ export function IdeaExpandView({
             <div className="p-6 border-b border-white/10">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="text-[var(--neon)] text-sm font-medium">{idea.founder}</div>
+                  <button
+                    type="button"
+                    onClick={() => idea.walletAddress && onFounderClick?.(idea.walletAddress)}
+                    data-testid="expand-founder-link-desktop"
+                    className="text-[var(--neon)] text-sm font-medium hover:underline"
+                  >
+                    {idea.founder}
+                  </button>
                   <h2 className="font-display text-2xl font-bold mt-1">{idea.name}</h2>
                 </div>
                 <button
@@ -279,16 +295,28 @@ function TabContent({ idea, activeTab }: { idea: Idea; activeTab: TabType }) {
 
     return (
       <div className="space-y-6">
-        {/* Intro Video Placeholder */}
+        {/* Founder Intro Video (IPFS-hosted via Pinata) */}
         <div>
           <h3 className="text-xs uppercase tracking-widest text-[var(--neon)] mb-3">
             Founder Intro
           </h3>
-          <div className="aspect-video rounded-xl bg-black/50 border border-white/10 flex items-center justify-center cursor-pointer hover:border-[var(--neon)]/50 transition-colors group">
-            <div className="h-14 w-14 rounded-full bg-[var(--neon)]/20 grid place-content-center group-hover:bg-[var(--neon)]/30 transition-colors">
-              <Play className="h-6 w-6 text-[var(--neon)] ml-1" />
+          {idea.pitchVideoUrl ? (
+            <video
+              src={idea.pitchVideoUrl}
+              controls
+              playsInline
+              preload="metadata"
+              data-testid={`pitch-video-${idea.id}`}
+              className="aspect-video w-full rounded-xl bg-black border border-white/10 object-cover"
+            />
+          ) : (
+            <div className="aspect-video rounded-xl bg-black/50 border border-dashed border-white/10 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2">
+              <div className="h-12 w-12 rounded-full bg-white/5 grid place-content-center">
+                <Play className="h-5 w-5 text-muted-foreground ml-0.5" />
+              </div>
+              No pitch video uploaded yet
             </div>
-          </div>
+          )}
         </div>
 
         {/* Team Members */}

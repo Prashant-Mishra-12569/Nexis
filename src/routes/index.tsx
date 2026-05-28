@@ -47,7 +47,7 @@ function Landing() {
           <a href="#how-it-works" className="hover:text-white transition-colors cursor-pointer">
             How it works
           </a>
-          <Link to="/onboarding" className="hover:text-white transition-colors">
+          <Link to="/onboarding" search={{}} className="hover:text-white transition-colors">
             For Builders
           </Link>
           <Link to="/feed" className="hover:text-white transition-colors">
@@ -119,6 +119,7 @@ function Landing() {
           </Link>
           <Link
             to="/onboarding"
+            search={{}}
             data-testid="landing-builder-btn"
             className="flex items-center gap-2 px-8 py-4 rounded-full glass hover:neon-border transition-all duration-300"
           >

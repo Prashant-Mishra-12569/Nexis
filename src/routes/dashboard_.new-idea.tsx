@@ -199,6 +199,8 @@ function NewIdeaPage() {
       founder,
       walletAddress,
       pitchDeckUrl: formData.pitchDeckUrl || undefined,
+      pitchVideoUrl:
+        profile?.role === "builder" && profile.pitchVideoUrl ? profile.pitchVideoUrl : undefined,
       website: formData.website || undefined,
       linkedIn: profile?.linkedin || undefined,
       twitter: profile?.twitter || undefined,
@@ -294,6 +296,7 @@ function NewIdeaPage() {
             </div>
             <Link
               to="/onboarding"
+              search={{}}
               className="px-4 py-2 rounded-full bg-[var(--neon)] text-black text-sm font-semibold whitespace-nowrap"
               data-testid="new-idea-go-onboarding"
             >

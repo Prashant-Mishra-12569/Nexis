@@ -11,16 +11,20 @@ import {
   type Idea,
 } from "@/lib/nexis/ideasStore";
 import { IdeaExpandView } from "./IdeaExpandView";
+import { useAuth } from "@/hooks/useAuth";
+import { PublicProfileModal } from "./PublicProfileModal";
 
 function Card({
   idea,
   onSwipe,
   onTap,
+  onFounderClick,
   isTop,
 }: {
   idea: Idea;
   onSwipe: (dir: "left" | "right") => void;
   onTap: () => void;
+  onFounderClick: (wallet: string) => void;
   isTop: boolean;
 }) {
   const x = useMotionValue(0);
@@ -79,7 +83,17 @@ function Card({
         </div>
 
         <div className="absolute bottom-0 inset-x-0 p-6 space-y-3">
-          <div className="text-[var(--neon)] text-sm font-medium">{idea.founder}</div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (idea.walletAddress) onFounderClick(idea.walletAddress);
+            }}
+            data-testid={`card-founder-${idea.id}`}
+            className="text-[var(--neon)] text-sm font-medium hover:underline"
+          >
+            {idea.founder}
+          </button>
           <h2 className="font-display text-3xl md:text-4xl font-bold leading-tight">{idea.name}</h2>
           <p className="text-sm text-white/80 leading-relaxed">{idea.tagline}</p>
           <div className="flex items-center gap-2 pt-2">
@@ -100,9 +114,11 @@ interface SwipeDeckProps {
 
 export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
   const controlled = externalIdeas !== undefined;
+  const { walletAddress } = useAuth();
   const [internalIdeas, setInternalIdeas] = useState<Idea[]>([]);
   const [index, setIndex] = useState(0);
   const [expandedIdea, setExpandedIdea] = useState<Idea | null>(null);
+  const [profileWallet, setProfileWallet] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState<"saved" | "unsaved" | null>(null);
   const viewedRef = useRef<Set<string>>(new Set());
 
@@ -134,7 +150,7 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
 
   function swipe(dir: "left" | "right") {
     if (!current) return;
-    saveSwipe(current.id, dir === "right");
+    saveSwipe(current.id, dir === "right", walletAddress);
     setIndex((i) => i + 1);
     onChanged?.();
   }
@@ -202,11 +218,19 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
                 idea={next}
                 onSwipe={swipe}
                 onTap={() => {}}
+                onFounderClick={() => {}}
                 isTop={false}
               />
             )}
             {current && (
-              <Card key={current.id} idea={current} onSwipe={swipe} onTap={handleTap} isTop />
+              <Card
+                key={current.id}
+                idea={current}
+                onSwipe={swipe}
+                onTap={handleTap}
+                onFounderClick={(w) => setProfileWallet(w)}
+                isTop
+              />
             )}
           </AnimatePresence>
         </div>
@@ -264,11 +288,13 @@ export function SwipeDeck({ ideas: externalIdeas, onChanged }: SwipeDeckProps) {
         isOpen={!!expandedIdea}
         onClose={() => setExpandedIdea(null)}
         onSavedChange={onChanged}
+        onFounderClick={(w) => setProfileWallet(w)}
         onSwipeRight={() => {
           swipe("right");
           setExpandedIdea(null);
         }}
       />
+      <PublicProfileModal walletAddress={profileWallet} onClose={() => setProfileWallet(null)} />
     </>
   );
 }

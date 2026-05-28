@@ -256,10 +256,10 @@ export function AppShell({
                       className="flex items-start gap-3 p-3 hover:bg-white/5 transition-colors"
                     >
                       <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[var(--neon)]/40 to-emerald-900 grid place-content-center text-xs font-bold shrink-0">
-                        {m.founderAvatar}
+                        {m.builderAvatar}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">{m.founderName}</div>
+                        <div className="text-sm font-medium truncate">{m.builderName}</div>
                         <div className="text-[11px] text-[var(--neon)]">{m.ideaName}</div>
                         <div className="text-xs text-muted-foreground truncate">
                           {m.lastMessage}

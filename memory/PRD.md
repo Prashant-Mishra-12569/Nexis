@@ -29,7 +29,26 @@
 
 ## What's been implemented (2026-01-27)
 
-### Iteration 3 — Routing fix + Save-for-later (latest)
+### Iteration 4 — Two-sided chat + role lock + Deal NFT lifecycle (latest)
+- **Chat sender-aware alignment** — Messages now carry `senderWallet`. Render compares to the current wallet → mine on the **right (neon)**, theirs on the **left (white)**. Fixes the "both sides look like sender" bug.
+- **Match perspective swap** — Match model now has explicit `builderWallet` + `investorWallet` (was a single ambiguous `walletAddress`). Investor swiping right creates a **pending** match in the BUILDER's inbox. Investor sees a "Waiting for builder…" hourglass state; only the builder sees Accept / Decline.
+- **Role lock** — Profile.Edit links to `/onboarding?edit=true`. In edit mode the role picker is hidden, the back button cancels to `/profile` instead of unrolling to the picker, and the final step replaces "Pay 1 MNT" with **"Save changes"** (no on-chain fee).
+- **Pitch video playback** — Builder's `pitchVideoUrl` (uploaded during onboarding to IPFS via Pinata) is now copied onto every idea they list and rendered with `<video controls>` in the IdeaExpandView Team tab.
+- **Clickable founder name → PublicProfileModal** — New `PublicProfileModal.tsx` component shows any wallet's public profile (avatar, role, location, thesis/ticket/industries for investors, listed ideas for builders, social links, Mantlescan link). Tapping the founder username on a swipe card or in chat opens it from the right.
+- **Demo seed removed** — `defaultIdeas` no longer auto-populate; gated behind `VITE_SEED_DEMO_IDEAS=true` env flag. New users see a clean feed populated only by real on-chain listings.
+- **Deal NFT lifecycle reworked per spec**:
+  1. **Builder-only** "Request Deal NFT" button appears in chat header (only after the match is `accepted`, and hidden once `confirmed`).
+  2. Builder click → Pinata metadata upload → on-chain `requestDealConfirmation(investor, name, tokenURI)` → emit `DealRequested` event → we parse the receipt logs (`decodeEventLog`) to extract `bytes32 dealId` → stamp it onto the chat message and the match.
+  3. A **system "Deal NFT requested" card** appears in the chat thread; the INVESTOR sees a "Confirm & Mint NFT" button on that card.
+  4. Investor clicks → on-chain `confirmDeal(dealId)` → NFT is minted directly to the builder by the contract.
+  5. Builder's Proof-of-Funding section on `/profile` already aggregates accepted/confirmed matches, so the new badge surfaces there automatically.
+- **Storage layer additions**:
+  - `nexis_messages` keyed by matchId; each `Message` has senderWallet + optional `dealId` + `tokenURI` for deal_request messages.
+  - Match model: `status: "pending" | "accepted" | "declined"`, `dealStatus: "none" | "requested" | "confirmed" | "rejected"`.
+  - New helpers: `getMatchesForWallet`, `acceptMatch`, `declineMatch`, `appendMessage`, `patchMessage`, `updateMatch`, `getMessages`.
+- **Tableland / Ceramic note**: Pragmatic stance taken — Tableland (every write = on-chain tx) is too costly for chat; Ceramic adds a heavy DID-Session layer. The storage layer is now cleanly abstracted so swapping localStorage for Tableland (ideas/profiles) or Ceramic (chat/saves) later is a contained 1-day migration.
+
+### Iteration 3 — Routing fix + Save-for-later
 - **Fixed "+ New idea" / "+ Create first idea" buttons** — Root cause: `dashboard.new-idea.tsx` was a *nested* child route under `dashboard.tsx`, but `dashboard.tsx` has no `<Outlet />`, so the child never rendered. The dashboard layout was just rendered instead with the URL pointing at `/dashboard/new-idea`. Renamed file to `dashboard_.new-idea.tsx` (TanStack flat-path syntax — trailing underscore makes the parent segment pathless) so the route renders independently. Now the full 5-step wizard (Basics → Details → Financials → Team → Review) loads correctly.
 - **Save-for-later bookmark feature** — Replaced the ambiguous Star "info" button in the SwipeDeck with two dedicated buttons:
   - **Yellow Bookmark** — toggles "save for later" (`toggleSavedIdea`) with a confirmation toast _"Saved to your bookmarks"_ / _"Removed from bookmarks"_, and the icon fills yellow when saved.
