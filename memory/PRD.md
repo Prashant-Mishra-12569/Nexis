@@ -1,100 +1,101 @@
-# Nexis — PRD
+# Nexis — Product Requirements Document (Updated)
 
-## Original problem statement
-> "Go on every page of the website and make sure it is fully functional, remove all the hardcoded part and make it ready to use. Solve every problem and make sure that each button the website should work and every data of the every page of the website should be real and loaded from the backend or smart contract."
->
-> Repo: https://github.com/Prashant-Mishra-12569/Nexis — "Web3 Tinder for builders & investors" on Mantle Sepolia.
+## What is Nexis?
 
-## Architecture
-- **Frontend**: React 19 + TanStack Start/Router + Vite 7 (SSR-capable) + Tailwind v4
-- **Web3**: Wagmi v2 + Viem + Privy Auth (email or wallet) on Mantle Sepolia (chainId 5003)
-- **Contracts (deployed)**:
-  - `NexisFinance` `0x652515Ea00993bb309616d8a708846c129BF9aE7` — onboarding fee, idea listing, boosts
-  - `NexisDealNFT` `0x5Efb1Cc6d6116c5e2b0fCb657dB04A5BB0f2E20A` — soulbound proof-of-funding NFTs
-- **Off-chain storage**: localStorage per-wallet (ideas, swipes, matches, messages, profiles, views, sentiment)
-- **IPFS**: Pinata for images, pitch videos, pitch decks, NFT metadata
-- **Chat**: XMTP (lib wired, currently demo-ready — needs signer init for production E2E)
-- **Process**: Vite dev server on port 3000 via supervisor `frontend` (wrapper at `/app/frontend/package.json` running bun)
+A **fully decentralized** Web3 "Tinder for builders & investors" on **Mantle Sepolia testnet**.
+Founders list startup ideas; investors swipe through a curated feed.
+Mutual interest opens encrypted chat (XMTP). When a deal closes, a **soulbound proof-of-funding NFT** is minted.
 
-## User personas
-- **Builder** — pays 1 MNT to become verified, lists first idea free, pays 0.5 MNT for additional ideas, can boost listings (3/5/10 MNT).
-- **Investor** — free signup, swipes through curated feed, requests deal-confirmation NFT on close.
+## Architecture — Fully Decentralized Stack
 
-## Core requirements (static)
-1. Every page reflects real data from wallet + localStorage + smart contracts — no hardcoded names, addresses, stats.
-2. Every interactive element has a working handler and `data-testid`.
-3. Auth-gated pages (Dashboard / Chat / Profile) prompt connect when not signed-in.
-4. Onboarding actually persists user profile + triggers on-chain `payOnboarding`.
-5. New-idea flow saves to local ideas store *and* calls `listFreeIdea` (first) or `payExtraIdea`.
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Auth** | Privy (email + wallet) | Web3 authentication |
+| **Structured Data** | **Tableland** (SQL on-chain) | Profiles, Ideas, Matches, Swipes, Saved, Sentiment |
+| **Messaging** | **XMTP Browser SDK v7** | E2E encrypted cross-device chat |
+| **Financial Ops** | Smart Contracts (NexisFinance + NexisDealNFT) | Payments, verification, NFTs |
+| **File Storage** | Pinata / IPFS | Images, videos, pitch decks, NFT metadata |
+| **Frontend** | React 19 + TanStack Router + Vite 7 + Tailwind v4 | SPA |
+| **UI Components** | Shadcn/UI + Custom (SwipeDeck, AppShell, etc.) | Design system |
 
-## What's been implemented (2026-01-27)
+### **ZERO localStorage for app data.** All data lives on Tableland, XMTP, smart contracts, or IPFS.
 
-### Iteration 4 — Two-sided chat + role lock + Deal NFT lifecycle (latest)
-- **Chat sender-aware alignment** — Messages now carry `senderWallet`. Render compares to the current wallet → mine on the **right (neon)**, theirs on the **left (white)**. Fixes the "both sides look like sender" bug.
-- **Match perspective swap** — Match model now has explicit `builderWallet` + `investorWallet` (was a single ambiguous `walletAddress`). Investor swiping right creates a **pending** match in the BUILDER's inbox. Investor sees a "Waiting for builder…" hourglass state; only the builder sees Accept / Decline.
-- **Role lock** — Profile.Edit links to `/onboarding?edit=true`. In edit mode the role picker is hidden, the back button cancels to `/profile` instead of unrolling to the picker, and the final step replaces "Pay 1 MNT" with **"Save changes"** (no on-chain fee).
-- **Pitch video playback** — Builder's `pitchVideoUrl` (uploaded during onboarding to IPFS via Pinata) is now copied onto every idea they list and rendered with `<video controls>` in the IdeaExpandView Team tab.
-- **Clickable founder name → PublicProfileModal** — New `PublicProfileModal.tsx` component shows any wallet's public profile (avatar, role, location, thesis/ticket/industries for investors, listed ideas for builders, social links, Mantlescan link). Tapping the founder username on a swipe card or in chat opens it from the right.
-- **Demo seed removed** — `defaultIdeas` no longer auto-populate; gated behind `VITE_SEED_DEMO_IDEAS=true` env flag. New users see a clean feed populated only by real on-chain listings.
-- **Deal NFT lifecycle reworked per spec**:
-  1. **Builder-only** "Request Deal NFT" button appears in chat header (only after the match is `accepted`, and hidden once `confirmed`).
-  2. Builder click → Pinata metadata upload → on-chain `requestDealConfirmation(investor, name, tokenURI)` → emit `DealRequested` event → we parse the receipt logs (`decodeEventLog`) to extract `bytes32 dealId` → stamp it onto the chat message and the match.
-  3. A **system "Deal NFT requested" card** appears in the chat thread; the INVESTOR sees a "Confirm & Mint NFT" button on that card.
-  4. Investor clicks → on-chain `confirmDeal(dealId)` → NFT is minted directly to the builder by the contract.
-  5. Builder's Proof-of-Funding section on `/profile` already aggregates accepted/confirmed matches, so the new badge surfaces there automatically.
-- **Storage layer additions**:
-  - `nexis_messages` keyed by matchId; each `Message` has senderWallet + optional `dealId` + `tokenURI` for deal_request messages.
-  - Match model: `status: "pending" | "accepted" | "declined"`, `dealStatus: "none" | "requested" | "confirmed" | "rejected"`.
-  - New helpers: `getMatchesForWallet`, `acceptMatch`, `declineMatch`, `appendMessage`, `patchMessage`, `updateMatch`, `getMessages`.
-- **Tableland / Ceramic note**: Pragmatic stance taken — Tableland (every write = on-chain tx) is too costly for chat; Ceramic adds a heavy DID-Session layer. The storage layer is now cleanly abstracted so swapping localStorage for Tableland (ideas/profiles) or Ceramic (chat/saves) later is a contained 1-day migration.
+## Tableland Tables (6 tables on Mantle Sepolia)
 
-### Iteration 3 — Routing fix + Save-for-later
-- **Fixed "+ New idea" / "+ Create first idea" buttons** — Root cause: `dashboard.new-idea.tsx` was a *nested* child route under `dashboard.tsx`, but `dashboard.tsx` has no `<Outlet />`, so the child never rendered. The dashboard layout was just rendered instead with the URL pointing at `/dashboard/new-idea`. Renamed file to `dashboard_.new-idea.tsx` (TanStack flat-path syntax — trailing underscore makes the parent segment pathless) so the route renders independently. Now the full 5-step wizard (Basics → Details → Financials → Team → Review) loads correctly.
-- **Save-for-later bookmark feature** — Replaced the ambiguous Star "info" button in the SwipeDeck with two dedicated buttons:
-  - **Yellow Bookmark** — toggles "save for later" (`toggleSavedIdea`) with a confirmation toast _"Saved to your bookmarks"_ / _"Removed from bookmarks"_, and the icon fills yellow when saved.
-  - **Blue Star** — opens the IdeaExpandView for full details.
-  Also added a matching Bookmark button inside both mobile + desktop variants of `IdeaExpandView`, so users can save while reading.
-- **New profile section "Saved for later"** — Lists all bookmarked ideas (thumbnail, name, industry, ask/equity) with a hover-revealed × button to unsave, and a hint when empty. Updates in real-time when the store changes via `onSavedChange` callback wired through SwipeDeck → IdeaExpandView.
-- **Storage layer** — Added `nexis_saved_ideas` localStorage key with timestamps (so most-recently-saved appear first), `isIdeaSaved` / `toggleSavedIdea` / `getSavedIdeas` helpers, and reset/clear hooks.
+1. **nexis_profiles** — User profiles with role locking (builder/investor)
+2. **nexis_ideas** — Startup ideas with metadata
+3. **nexis_matches** — Match records between investors and builders
+4. **nexis_swipes** — Swipe history (liked/disliked)
+5. **nexis_saved** — Bookmarked ideas
+6. **nexis_sentiment** — Views, likes, dislikes per idea
 
-### Iteration 2 — Network safety + new-wallet onboarding
-- **Wrong-network detection** — Added `useAuth.isOnMantle` + `chainId` from `useChainId`. A persistent amber **WrongNetworkBanner** is now shown on every authenticated app page when the wallet is on the wrong chain (e.g. Base Sepolia). One-click "Switch to Mantle Sepolia" via `primaryWallet.switchChain(5003)` (Privy) with fallback to `wagmi.switchChain`.
-- **Action-button guards** — Onboarding "Pay 1 MNT", New-idea "Submit Idea", and Dashboard "Boost" buttons are all wrapped in `<NetworkGuard>`. If the wallet is connected but not on Mantle, the action button is replaced by a yellow "Switch to Mantle Sepolia" CTA — making it impossible to ever fire a tx on the wrong chain.
-- **New-wallet auto-redirect** — `AppShell` now checks `getProfile(wallet)` + on-chain `isVerifiedBuilder`. If both are empty and the user is on any app route (not `/` or `/onboarding`), they're redirected to `/onboarding` to pick Builder/Investor before being dropped into the builder/investor flows.
-- **Infra resilience** — Platform was overwriting `/app/frontend/package.json` with a CRA template on every restart, killing the Vite dev server. Restored the wrapper script that delegates `yarn start` → `bun run dev` on the actual TanStack Start app at `/app`.
+## Setup Flow
 
-### Iteration 1 — Full functionality wiring (foundational)
-- **Profile page** — Fully dynamic: real wallet, balance, profile name/socials/location from per-wallet store, real ideas count, real right-swipes received, real Proof-of-Funding cards from matches, copy-to-clipboard, Mantlescan explorer link, Edit profile link.
-- **Dashboard** — Shows only the current wallet's ideas, real views/likes/dislikes sentiment from `getIdeaSentiment` + `getIdeaViews`, real matches count, expiry days remaining per idea, Boost modal calling `useBuyBoost` with correct ideaId for the selected idea.
-- **New Idea form** — Fully wired: persists via `addIdea(...)`, calls `listFreeIdea` for owner's first idea or `payExtraIdea` (with verified-builder gate via `useIsVerifiedBuilder`). All fields are controlled, IPFS uploads return URLs that are stored, implied valuation calculated live.
-- **Onboarding** — Inputs are now controlled and saved to `profileStore` (builder or investor variant). Investor preferences (ticket size + industries) persist. Fixed `setTimeout(navigate)` anti-pattern by moving redirect into `useEffect`. Pre-fills form for returning users.
-- **AppShell** — Real wallet + balance + initials in sidebar, Logout button, working Connect button. Real-time **unread match badges** on Chat nav. **Functional search** with live results dropdown. **Notifications dropdown** listing recent matches with deep-links.
-- **Feed page** — Trending / Newest sort + 8 industry filters all functional, own ideas excluded from feed, expired ideas filtered out, view counter increments per card seen, clear-filter button when industry active.
-- **SwipeDeck** — Accepts external `ideas` prop, calls `onChanged` to refresh parent on swipe, view-counter tracking, "Reset Feed" button works.
-- **Chat** — Real founder name + industry from idea data, working Accept/Decline, message persistence per-match, last-message updates in sidebar, mark-read on open, Request Deal NFT now uses real `industry` and validates investor address before contract call.
-- **Landing** — Real ideas/matches/capital stats from store (fixed buggy capital calculation), Connect/Disconnect flow, data-testids on all CTAs.
-- **Stores added/extended**: `profileStore.ts` (per-wallet profiles), idea-sentiment tracker, idea-view counter, match read/decline/update helpers, getIdeasByOwner / getReceivedRightSwipes / getOwnerTotalViews.
-- **Code hygiene**: deleted orphan `lib/nexis/data.ts`, fixed missing `ethers` typing in `xmtp.ts`, zero TS errors, zero ESLint errors (only pre-existing shadcn fast-refresh warnings).
-- **Infra**: bun installed, vite.config wired to bind 0.0.0.0:3000 with HMR over wss, supervisor wrapper at `/app/frontend/package.json`.
+1. Admin goes to `/setup`
+2. Deploys AllowAll controller contract (1 tx)
+3. Creates 6 Tableland tables (6 txs)
+4. Sets controller on each table (6 txs)
+5. App is ready for all users
 
-## How it works end-to-end (verified live)
-1. Visit `/` → Launch App → routes to `/feed`.
-2. On `/feed`, click "Newest" or any industry pill → list re-filters/re-sorts; swipe right → match is created; bell + Chat sidebar badge increment in real time.
-3. `/profile`, `/dashboard`, `/chat` correctly prompt wallet connection if not signed in.
-4. After wallet sign-in via Privy → `/onboarding` → user fills form → builder pays 1 MNT (`payOnboarding`) → redirect to dashboard.
-5. `/dashboard/new-idea` → 5-step form → submit → `listFreeIdea` (first idea) or `payExtraIdea` (subsequent) → idea appears on `/feed` for others, on `/profile` + `/dashboard` for owner.
-6. Boost modal on dashboard → tier select → `buyBoost(tier, ideaId)` on Mantle Sepolia.
-7. Chat → Accept match → message → Request Deal NFT → `createDealNFTMetadata` (Pinata) → `requestDealConfirmation` on `NexisDealNFT`.
+## Key Flows
 
-## Prioritized backlog
-- **P1**: Wire real XMTP `initXMTP(signer)` instead of the 600ms simulated ready flag (lib exists at `src/lib/web3/xmtp.ts`).
-- **P1**: Read `isIdeaBoosted` / `getBoostDetails` to render boosted badges in feed and re-rank.
-- **P2**: Index on-chain `IdeaListed` / `IdeaBoosted` events to sync ideas across devices (right now ideas live in per-browser localStorage).
-- **P2**: AI match-score that scores investor ↔ idea using investor thesis + idea industry (currently the score field is a static 75–95 random).
-- **P3**: Idea renewal flow — `expiry.ts` already supports `canRenewIdea`/`renewIdea`; needs UI on `/dashboard`.
-- **P3**: Mobile bottom-sheet polish on `IdeaExpandView`.
+### Onboarding
+- User connects wallet → picks Builder or Investor
+- **Role is PERMANENTLY locked** to wallet address
+- Builder pays 1 MNT on-chain → profile saved to Tableland
+- Investor skips payment → profile saved to Tableland
 
-## Next tasks
-- Hook XMTP for real E2E chat (requires viem WalletClient → ethers-compatible signer adapter).
-- Build cross-device idea sync (subgraph or simple JSON API) so ideas aren't trapped per-browser.
-- Add deal-NFT mint flow (currently only the *request* is implemented; counter-party must call `confirmDeal`).
+### Builder Creates Idea
+- 5-step wizard → idea saved to Tableland
+- First idea free (on-chain `listFreeIdea`), additional cost 0.5 MNT
+
+### Investor Discovers & Swipes
+- Feed pulls ideas from Tableland (no mock data)
+- Left swipe = pass, Right swipe = interested
+- Swipe recorded in Tableland
+- Right swipe creates a Match in Tableland (status: "pending")
+
+### Match Flow
+- **Builder** sees pending match in chat inbox
+- **Builder** accepts or declines (NOT the investor)
+- Accept → chat opens via XMTP
+- Decline → match removed
+
+### Chat (XMTP)
+- E2E encrypted, cross-device
+- Messages show correct sender/receiver sides
+- Real-time streaming
+
+### Deal NFT Flow
+- **Builder only** can request Deal NFT
+- Builder clicks "Request Deal NFT" → on-chain `requestDealConfirmation`
+- Investor sees "Confirm & Mint NFT" button
+- Investor confirms → soulbound NFT minted to builder
+- Shows as achievement in builder's profile
+
+## Smart Contracts (Deployed)
+
+- **NexisFinance**: `0x652515Ea00993bb309616d8a708846c129BF9aE7`
+- **NexisDealNFT**: `0x5Efb1Cc6d6116c5e2b0fCb657dB04A5BB0f2E20A`
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Landing page with stats, how-it-works, CTAs |
+| `/setup` | Admin Tableland table creation wizard |
+| `/onboarding` | Role picker + profile form |
+| `/feed` | Swipe deck with filters |
+| `/dashboard` | Builder console (ideas, stats, boost) |
+| `/dashboard/new-idea` | 5-step idea creation wizard |
+| `/chat` | Match inbox + XMTP messaging |
+| `/profile` | User profile with stats + achievements |
+
+## UI Enhancements
+
+- Custom animated neon cursor (outer ring + inner dot)
+- Smooth page transitions
+- Shimmer loading effects
+- Touch-friendly tap targets on mobile
+- Responsive typography
+- Focus-visible states

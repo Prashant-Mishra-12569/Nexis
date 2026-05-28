@@ -298,12 +298,31 @@ function TabContent({ idea, activeTab }: { idea: Idea; activeTab: TabType }) {
           </h3>
           {idea.pitchVideoUrl ? (
             <video
-              src={idea.pitchVideoUrl}
+              src={
+                idea.pitchVideoUrl.startsWith("http")
+                  ? idea.pitchVideoUrl
+                  : idea.pitchVideoUrl.startsWith("ipfs://")
+                    ? `https://gateway.pinata.cloud/ipfs/${idea.pitchVideoUrl.replace("ipfs://", "")}`
+                    : `https://gateway.pinata.cloud/ipfs/${idea.pitchVideoUrl}`
+              }
               controls
               playsInline
               preload="metadata"
+              crossOrigin="anonymous"
               data-testid={`pitch-video-${idea.id}`}
               className="aspect-video w-full rounded-xl bg-black border border-white/10 object-cover"
+              onError={(e) => {
+                const target = e.target as HTMLVideoElement;
+                target.style.display = "none";
+                const parent = target.parentElement;
+                if (parent) {
+                  const fallback = document.createElement("div");
+                  fallback.className =
+                    "aspect-video rounded-xl bg-black/50 border border-dashed border-white/10 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2";
+                  fallback.innerHTML = '<div class="text-center">Video could not be loaded</div>';
+                  parent.appendChild(fallback);
+                }
+              }}
             />
           ) : (
             <div className="aspect-video rounded-xl bg-black/50 border border-dashed border-white/10 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2">
