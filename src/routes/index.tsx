@@ -39,13 +39,13 @@ function Landing() {
 
       {/* Nav - Glassmorphic Floating Header */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 relative z-10">
-        <header className="flex items-center justify-between border border-white/10 bg-white/5 backdrop-blur-md rounded-full px-6 py-3.5 shadow-2xl">
+        <header className="flex items-center justify-between border border-white/10 bg-white/5 backdrop-blur-md rounded-full px-4 sm:px-6 py-2.5 sm:py-3.5 shadow-2xl">
           <div className="flex items-center gap-2.5">
             {/* Nexis Custom Logo (N icon) */}
             <svg className="h-6 w-6 text-[#00ff9d] drop-shadow-[0_0_8px_rgba(0,255,157,0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 4v16L20 4v16" />
             </svg>
-            <span className="font-display text-xl font-black tracking-tight text-white">Nexis</span>
+            <span className="font-display text-lg sm:text-xl font-black tracking-tight text-white hidden min-[360px]:inline-block">Nexis</span>
           </div>
           
           <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-white/70">
@@ -71,7 +71,7 @@ function Landing() {
                 </div>
                 <Link
                   to={launchPath}
-                  className="px-5.5 py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-[#00ff9d] hover:from-emerald-400 hover:to-[#00ff9d] text-black font-extrabold text-[11px] shadow-[0_0_20px_rgba(0,255,157,0.25)] hover:shadow-[0_0_25px_rgba(0,255,157,0.4)] transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wider uppercase"
+                  className="px-3.5 sm:px-5.5 py-2 sm:py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-[#00ff9d] hover:from-emerald-400 hover:to-[#00ff9d] text-black font-extrabold text-[9px] sm:text-[11px] shadow-[0_0_20px_rgba(0,255,157,0.25)] hover:shadow-[0_0_25px_rgba(0,255,157,0.4)] transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wider uppercase shrink-0"
                 >
                   Launch App
                 </Link>
@@ -93,7 +93,7 @@ function Landing() {
                 </button>
                 <Link
                   to={launchPath}
-                  className="px-5.5 py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-[#00ff9d] hover:from-emerald-400 hover:to-[#00ff9d] text-black font-extrabold text-[11px] shadow-[0_0_20px_rgba(0,255,157,0.25)] hover:shadow-[0_0_25px_rgba(0,255,157,0.4)] transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wider uppercase"
+                  className="px-3.5 sm:px-5.5 py-2 sm:py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-[#00ff9d] hover:from-emerald-400 hover:to-[#00ff9d] text-black font-extrabold text-[9px] sm:text-[11px] shadow-[0_0_20px_rgba(0,255,157,0.25)] hover:shadow-[0_0_25px_rgba(0,255,157,0.4)] transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wider uppercase shrink-0"
                 >
                   Launch App
                 </Link>

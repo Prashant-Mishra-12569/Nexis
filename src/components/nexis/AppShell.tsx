@@ -79,9 +79,9 @@ export function AppShell({
       {/* Desktop Floating Sidebar */}
       <aside className="hidden md:flex fixed left-4 top-4 bottom-4 w-60 flex-col border border-white/[0.08] bg-[#090b0a]/75 backdrop-blur-xl z-30 p-5 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
         <Link to="/" className="flex items-center gap-3 mb-8 px-2" data-testid="sidebar-logo">
-          <div className="h-9 w-9 rounded-xl bg-[#00ff9d] grid place-content-center shadow-[0_0_15px_rgba(0,255,157,0.4)]">
-            <Zap className="h-5 w-5 text-black" strokeWidth={2.5} />
-          </div>
+          <svg className="h-6 w-6 text-[#00ff9d] drop-shadow-[0_0_8px_rgba(0,255,157,0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 4v16L20 4v16" />
+          </svg>
           <span className="font-display text-xl font-black tracking-tight text-white">Nexis</span>
         </Link>
         
@@ -173,9 +173,9 @@ export function AppShell({
       <header className="mx-4 mt-4 md:mx-0 md:ml-[272px] md:mr-4 md:mt-4 sticky top-4 z-20 px-6 py-4 flex items-center justify-between border border-white/[0.08] bg-[#090b0a]/75 backdrop-blur-xl rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
         <div className="flex items-center gap-2 md:hidden">
           <Link to="/" className="flex items-center gap-2.5" data-testid="topbar-logo">
-            <div className="h-8.5 w-8.5 rounded-lg bg-[#00ff9d] grid place-content-center shadow-[0_0_10px_rgba(0,255,157,0.4)]">
-              <Zap className="h-4.5 w-4.5 text-black" strokeWidth={2.5} />
-            </div>
+            <svg className="h-6 w-6 text-[#00ff9d] drop-shadow-[0_0_8px_rgba(0,255,157,0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 4v16L20 4v16" />
+            </svg>
             <span className="font-display font-black text-lg text-white">Nexis</span>
           </Link>
         </div>
