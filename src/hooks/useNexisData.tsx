@@ -66,7 +66,7 @@ export function NexisDataProvider({ children }: { children: React.ReactNode }) {
   const { walletAddress } = useAuth();
   const signer = useTablelandSigner();
 
-  const [tablesReady, setTablesReady] = useState(isTablesReady());
+  const [tablesReady, setTablesReady] = useState(true);
   const [loading, setLoading] = useState(false);
   const [ideas, setIdeas] = useState<TIdeas.Idea[]>([]);
   const [myProfile, setMyProfile] = useState<TProfiles.UserProfile | null>(null);
@@ -82,12 +82,9 @@ export function NexisDataProvider({ children }: { children: React.ReactNode }) {
 
   const myRole = myProfile?.role ?? null;
 
-  // Check table readiness periodically
+  // Supabase storage is always online and ready
   useEffect(() => {
-    const check = () => setTablesReady(isTablesReady());
-    check();
-    const interval = setInterval(check, 3000);
-    return () => clearInterval(interval);
+    setTablesReady(true);
   }, []);
 
   // Load all data from Tableland when tables become ready

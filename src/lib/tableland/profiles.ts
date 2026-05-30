@@ -1,8 +1,7 @@
 /**
- * Tableland Profile CRUD — replaces profileStore localStorage
+ * Profiles CRUD — migrated from Tableland to Supabase
  */
-import { getReadOnlyDatabase, getDatabase } from "./client";
-import { getTableNames } from "./config";
+import { supabase } from "../supabase/client";
 import type { JsonRpcSigner } from "ethers";
 
 export type Role = "builder" | "investor";
@@ -39,100 +38,82 @@ export interface InvestorProfile {
 export type UserProfile = BuilderProfile | InvestorProfile;
 
 /**
- * Get a profile by wallet address (read-only, free)
+ * Get a profile by wallet address
  */
 export async function getProfile(walletAddress: string): Promise<UserProfile | null> {
-  const tables = getTableNames();
-  if (!tables) return null;
-
+  if (!walletAddress) return null;
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db
-      .prepare(`SELECT * FROM ${tables.profiles} WHERE wallet = ?1;`)
-      .bind(walletAddress.toLowerCase())
-      .all();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("wallet", walletAddress.toLowerCase())
+      .maybeSingle();
 
-    if (results.length === 0) return null;
-    return rowToProfile(results[0]);
+    if (error) {
+      console.error("getProfile error:", error);
+      return null;
+    }
+    if (!data) return null;
+    return rowToProfile(data);
   } catch (e) {
-    console.error("getProfile error:", e);
+    console.error("getProfile unexpected error:", e);
     return null;
   }
 }
 
 /**
- * Save / upsert a profile (on-chain write — costs gas)
+ * Save / upsert a profile
  */
 export async function saveProfile(
-  signer: JsonRpcSigner,
+  signer: JsonRpcSigner | undefined,
   profile: UserProfile,
 ): Promise<UserProfile> {
-  const tables = getTableNames();
-  if (!tables) throw new Error("Tables not set up");
-
-  const db = getDatabase(signer);
   const wallet = profile.walletAddress.toLowerCase();
+
+  const payload: any = {
+    wallet,
+    role: profile.role,
+    name: profile.name,
+    location: profile.location || "",
+    linkedin: profile.linkedin || "",
+    twitter: profile.twitter || "",
+    profile_pic_url: profile.profilePicUrl || "",
+    is_verified: profile.role === "builder" && profile.isVerified,
+  };
+
+  if (profile.role === "builder") {
+    payload.github = profile.github || "";
+    payload.pitch_video_url = profile.pitchVideoUrl || "";
+  } else if (profile.role === "investor") {
+    payload.firm_name = profile.firmName || "";
+    payload.thesis = profile.thesis || "";
+    payload.ticket_size = profile.ticketSize || "";
+    payload.industries = profile.industries || [];
+  }
 
   // Check if exists
   const existing = await getProfile(profile.walletAddress);
 
   if (existing) {
-    // UPDATE — role is locked, cannot change
-    const { meta } = await db
-      .prepare(
-        `UPDATE ${tables.profiles} SET
-          name = ?1, location = ?2, linkedin = ?3, twitter = ?4,
-          github = ?5, firm_name = ?6, thesis = ?7, ticket_size = ?8,
-          industries = ?9, profile_pic_url = ?10, pitch_video_url = ?11,
-          is_verified = ?12
-        WHERE wallet = ?13;`,
-      )
-      .bind(
-        profile.name,
-        profile.location || "",
-        profile.linkedin || "",
-        profile.twitter || "",
-        profile.role === "builder" ? profile.github || "" : "",
-        profile.role === "investor" ? profile.firmName || "" : "",
-        profile.role === "investor" ? profile.thesis || "" : "",
-        profile.role === "investor" ? profile.ticketSize || "" : "",
-        profile.role === "investor" ? JSON.stringify(profile.industries || []) : "[]",
-        profile.profilePicUrl || "",
-        profile.role === "builder" ? profile.pitchVideoUrl || "" : "",
-        profile.role === "builder" && profile.isVerified ? 1 : 0,
-      )
-      .bind(wallet)
-      .run();
-    await meta.txn?.wait();
+    // UPDATE
+    const { error } = await supabase
+      .from("profiles")
+      .update(payload)
+      .eq("wallet", wallet);
+    if (error) {
+      console.error("saveProfile UPDATE error:", error);
+      throw error;
+    }
   } else {
     // INSERT
-    const { meta } = await db
-      .prepare(
-        `INSERT INTO ${tables.profiles}
-          (wallet, role, name, location, linkedin, twitter, github,
-           firm_name, thesis, ticket_size, industries, profile_pic_url,
-           pitch_video_url, is_verified, joined_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15);`,
-      )
-      .bind(
-        wallet,
-        profile.role,
-        profile.name,
-        profile.location || "",
-        profile.linkedin || "",
-        profile.twitter || "",
-        profile.role === "builder" ? profile.github || "" : "",
-        profile.role === "investor" ? profile.firmName || "" : "",
-        profile.role === "investor" ? profile.thesis || "" : "",
-        profile.role === "investor" ? profile.ticketSize || "" : "",
-        profile.role === "investor" ? JSON.stringify(profile.industries || []) : "[]",
-        profile.profilePicUrl || "",
-        profile.role === "builder" ? profile.pitchVideoUrl || "" : "",
-        profile.role === "builder" && profile.isVerified ? 1 : 0,
-        Date.now(),
-      )
-      .run();
-    await meta.txn?.wait();
+    payload.joined_at = Date.now();
+    const { error } = await supabase
+      .from("profiles")
+      .insert(payload);
+    if (error) {
+      console.error("saveProfile INSERT error:", error);
+      throw error;
+    }
   }
 
   return profile;
@@ -142,18 +123,21 @@ export async function saveProfile(
  * Get all profiles (for search, discovery)
  */
 export async function getAllProfiles(): Promise<UserProfile[]> {
-  const tables = getTableNames();
-  if (!tables) return [];
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db.prepare(`SELECT * FROM ${tables.profiles};`).all();
-    return results.map(rowToProfile);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*");
+    if (error) {
+      console.error("getAllProfiles error:", error);
+      return [];
+    }
+    return (data || []).map(rowToProfile);
   } catch {
     return [];
   }
 }
 
-// Helper: convert Tableland row to UserProfile
+// Helper: convert row to UserProfile
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToProfile(row: any): UserProfile {
   const role = row.role as Role;
@@ -165,12 +149,12 @@ function rowToProfile(row: any): UserProfile {
       firmName: row.firm_name || "",
       thesis: row.thesis || "",
       ticketSize: row.ticket_size || "",
-      industries: safeJsonParse(row.industries, []),
+      industries: Array.isArray(row.industries) ? row.industries : [],
       linkedin: row.linkedin || "",
       twitter: row.twitter || "",
       location: row.location || "",
       profilePicUrl: row.profile_pic_url || null,
-      joinedAt: row.joined_at || 0,
+      joinedAt: Number(row.joined_at || 0),
     };
   }
   return {
@@ -183,18 +167,9 @@ function rowToProfile(row: any): UserProfile {
     github: row.github || "",
     profilePicUrl: row.profile_pic_url || null,
     pitchVideoUrl: row.pitch_video_url || null,
-    joinedAt: row.joined_at || 0,
-    isVerified: row.is_verified === 1,
+    joinedAt: Number(row.joined_at || 0),
+    isVerified: !!row.is_verified,
   };
-}
-
-function safeJsonParse<T>(val: string | null | undefined, fallback: T): T {
-  if (!val) return fallback;
-  try {
-    return JSON.parse(val);
-  } catch {
-    return fallback;
-  }
 }
 
 export function getInitials(
@@ -204,12 +179,12 @@ export function getInitials(
   if (profile?.name) {
     return (
       profile.name
-        .replace("@", "")
-        .split(/[\s.]+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((p) => p[0]?.toUpperCase())
-        .join("") || "BR"
+          .replace("@", "")
+          .split(/[\s.]+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((p) => p[0]?.toUpperCase())
+          .join("") || "BR"
     );
   }
   if (fallback) return fallback.slice(2, 4).toUpperCase();

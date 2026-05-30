@@ -1,8 +1,7 @@
 /**
- * Tableland Matches CRUD — replaces localStorage match management
+ * Matches CRUD — migrated from Tableland to Supabase
  */
-import { getReadOnlyDatabase, getDatabase } from "./client";
-import { getTableNames } from "./config";
+import { supabase } from "../supabase/client";
 import type { JsonRpcSigner } from "ethers";
 
 export type MatchStatus = "pending" | "accepted" | "declined";
@@ -29,10 +28,10 @@ export interface Match {
 }
 
 /**
- * Create a match (investor swiped right)
+ * Create a match
  */
 export async function createMatch(
-  signer: JsonRpcSigner,
+  signer: JsonRpcSigner | undefined,
   data: {
     ideaId: string;
     ideaName: string;
@@ -44,39 +43,34 @@ export async function createMatch(
     investorAvatar?: string;
   },
 ): Promise<Match> {
-  const tables = getTableNames();
-  if (!tables) throw new Error("Tables not set up");
-
-  const db = getDatabase(signer);
   const id = crypto.randomUUID();
   const now = Date.now();
 
-  const { meta } = await db
-    .prepare(
-      `INSERT INTO ${tables.matches}
-        (id, idea_id, idea_name, industry, builder_name, builder_avatar,
-         builder_wallet, investor_wallet, investor_avatar, matched_at,
-         last_message, unread, status, deal_status)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14);`,
-    )
-    .bind(
-      id,
-      data.ideaId,
-      data.ideaName,
-      data.industry || "",
-      data.builderName,
-      data.builderAvatar,
-      data.builderWallet.toLowerCase(),
-      data.investorWallet.toLowerCase(),
-      data.investorAvatar || "",
-      now,
-      "New interest from investor.",
-      1,
-      "pending",
-      "none",
-    )
-    .run();
-  await meta.txn?.wait();
+  const payload = {
+    id,
+    idea_id: data.ideaId,
+    idea_name: data.ideaName,
+    industry: data.industry || "",
+    builder_name: data.builderName,
+    builder_avatar: data.builderAvatar,
+    builder_wallet: data.builderWallet.toLowerCase(),
+    investor_wallet: data.investorWallet.toLowerCase(),
+    investor_avatar: data.investorAvatar || "",
+    matched_at: now,
+    last_message: "New interest from investor.",
+    unread: true,
+    status: "pending",
+    deal_status: "none",
+  };
+
+  const { error } = await supabase
+    .from("matches")
+    .insert(payload);
+
+  if (error) {
+    console.error("createMatch error:", error);
+    throw error;
+  }
 
   return {
     ...data,
@@ -96,21 +90,27 @@ export async function getMatchesForWallet(
   walletAddress: string,
   role?: "builder" | "investor",
 ): Promise<Match[]> {
-  const tables = getTableNames();
-  if (!tables) return [];
+  if (!walletAddress) return [];
   try {
-    const db = getReadOnlyDatabase();
     const w = walletAddress.toLowerCase();
-    let sql: string;
+    let query = supabase.from("matches").select("*");
+
     if (role === "builder") {
-      sql = `SELECT * FROM ${tables.matches} WHERE builder_wallet = '${w}' ORDER BY matched_at DESC;`;
+      query = query.eq("builder_wallet", w);
     } else if (role === "investor") {
-      sql = `SELECT * FROM ${tables.matches} WHERE investor_wallet = '${w}' ORDER BY matched_at DESC;`;
+      query = query.eq("investor_wallet", w);
     } else {
-      sql = `SELECT * FROM ${tables.matches} WHERE builder_wallet = '${w}' OR investor_wallet = '${w}' ORDER BY matched_at DESC;`;
+      query = query.or(`builder_wallet.eq.${w},investor_wallet.eq.${w}`);
     }
-    const { results } = await db.prepare(sql).all();
-    return results.map(rowToMatch);
+
+    const { data, error } = await query.order("matched_at", { ascending: false });
+
+    if (error) {
+      console.error("getMatchesForWallet error:", error);
+      return [];
+    }
+
+    return (data || []).map(rowToMatch);
   } catch (e) {
     console.error("getMatchesForWallet error:", e);
     return [];
@@ -118,59 +118,61 @@ export async function getMatchesForWallet(
 }
 
 /**
- * Check if a match already exists (prevent duplicates)
+ * Check if a match already exists
  */
 export async function matchExists(
   ideaId: string,
   investorWallet: string,
 ): Promise<boolean> {
-  const tables = getTableNames();
-  if (!tables) return false;
+  if (!ideaId || !investorWallet) return false;
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db
-      .prepare(
-        `SELECT id FROM ${tables.matches} WHERE idea_id = '${ideaId}' AND investor_wallet = '${investorWallet.toLowerCase()}';`,
-      )
-      .all();
-    return results.length > 0;
+    const { data, error } = await supabase
+      .from("matches")
+      .select("id")
+      .eq("idea_id", ideaId)
+      .eq("investor_wallet", investorWallet.toLowerCase());
+
+    if (error) {
+      console.error("matchExists error:", error);
+      return false;
+    }
+
+    return (data || []).length > 0;
   } catch {
     return false;
   }
 }
 
 /**
- * Update a match field (on-chain write)
+ * Update a match field
  */
 export async function updateMatch(
-  signer: JsonRpcSigner,
+  signer: JsonRpcSigner | undefined,
   matchId: string,
   patch: Partial<Pick<Match, "status" | "dealStatus" | "dealId" | "dealTokenURI" | "dealTokenId" | "lastMessage" | "unread">>,
 ): Promise<void> {
-  const tables = getTableNames();
-  if (!tables) return;
+  if (!matchId) return;
 
-  const db = getDatabase(signer);
-  const sets: string[] = [];
-  const vals: (string | number)[] = [];
-  let idx = 1;
+  const payload: any = {};
+  if (patch.status !== undefined) payload.status = patch.status;
+  if (patch.dealStatus !== undefined) payload.deal_status = patch.dealStatus;
+  if (patch.dealId !== undefined) payload.deal_id = patch.dealId;
+  if (patch.dealTokenURI !== undefined) payload.deal_token_uri = patch.dealTokenURI;
+  if (patch.dealTokenId !== undefined) payload.deal_token_id = patch.dealTokenId;
+  if (patch.lastMessage !== undefined) payload.last_message = patch.lastMessage;
+  if (patch.unread !== undefined) payload.unread = !!patch.unread;
 
-  if (patch.status !== undefined) { sets.push(`status = ?${idx}`); vals.push(patch.status); idx++; }
-  if (patch.dealStatus !== undefined) { sets.push(`deal_status = ?${idx}`); vals.push(patch.dealStatus); idx++; }
-  if (patch.dealId !== undefined) { sets.push(`deal_id = ?${idx}`); vals.push(patch.dealId); idx++; }
-  if (patch.dealTokenURI !== undefined) { sets.push(`deal_token_uri = ?${idx}`); vals.push(patch.dealTokenURI); idx++; }
-  if (patch.dealTokenId !== undefined) { sets.push(`deal_token_id = ?${idx}`); vals.push(patch.dealTokenId); idx++; }
-  if (patch.lastMessage !== undefined) { sets.push(`last_message = ?${idx}`); vals.push(patch.lastMessage); idx++; }
-  if (patch.unread !== undefined) { sets.push(`unread = ?${idx}`); vals.push(patch.unread ? 1 : 0); idx++; }
+  if (Object.keys(payload).length === 0) return;
 
-  if (sets.length === 0) return;
+  const { error } = await supabase
+    .from("matches")
+    .update(payload)
+    .eq("id", matchId);
 
-  vals.push(matchId);
-  const sql = `UPDATE ${tables.matches} SET ${sets.join(", ")} WHERE id = ?${idx};`;
-  const stmt = db.prepare(sql);
-  const bound = stmt.bind(...vals);
-  const { meta } = await bound.run();
-  await meta.txn?.wait();
+  if (error) {
+    console.error("updateMatch error:", error);
+    throw error;
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,9 +187,9 @@ function rowToMatch(row: any): Match {
     builderWallet: row.builder_wallet || "",
     investorWallet: row.investor_wallet || "",
     investorAvatar: row.investor_avatar || "",
-    matchedAt: new Date(row.matched_at || 0),
+    matchedAt: new Date(Number(row.matched_at || 0)),
     lastMessage: row.last_message || "",
-    unread: row.unread === 1,
+    unread: !!row.unread,
     status: (row.status || "pending") as MatchStatus,
     dealStatus: (row.deal_status || "none") as DealStatus,
     dealId: row.deal_id || undefined,

@@ -25,6 +25,7 @@ import {
   usePayExtraIdea,
   generateIdeaId,
   useIsVerifiedBuilder,
+  useBuilderIdeaCount,
 } from "@/lib/web3/hooks";
 import { useNexisData, type TeamMember as StoredTeamMember } from "@/hooks/useNexisData";
 import { NetworkGuard } from "@/components/nexis/NetworkGuard";
@@ -76,6 +77,7 @@ function NewIdeaPage() {
   const navigate = useNavigate();
   const { walletAddress, isAuthenticated, login, isOnMantle } = useAuth();
   const { data: isVerified } = useIsVerifiedBuilder(walletAddress || undefined);
+  const { data: builderIdeaCount } = useBuilderIdeaCount(walletAddress || undefined);
   const {
     listFreeIdea,
     isPending: freePending,
@@ -96,7 +98,6 @@ function NewIdeaPage() {
   const [showOnboardingHint, setShowOnboardingHint] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<Record<string, boolean>>({});
-  const [ownerIdeasCount, setOwnerIdeasCount] = useState(0);
 
   const [formData, setFormData] = useState<IdeaFormData>({
     title: "",
@@ -115,14 +116,11 @@ function NewIdeaPage() {
     teamMembers: [],
   });
 
-  const { myProfile: profile, addIdea: addIdeaTL, getIdeasByOwner, tablesReady } = useNexisData();
+  const { myProfile: profile, addIdea: addIdeaTL, tablesReady } = useNexisData();
 
-  useEffect(() => {
-    if (!walletAddress) return;
-    getIdeasByOwner(walletAddress).then((ideas) => setOwnerIdeasCount(ideas.length));
-  }, [walletAddress, getIdeasByOwner]);
-
-  const isFirstIdea = ownerIdeasCount === 0;
+  // If not verified on-chain, their first idea will be free after onboarding.
+  // If verified, it's only free if builderIdeaCount is 1 on-chain.
+  const isFirstIdea = !isVerified || (builderIdeaCount !== undefined && Number(builderIdeaCount) === 1);
   const txPending = freePending || freeConfirming || extraPending || extraConfirming;
   const txError = freeError || extraError;
 
@@ -221,11 +219,7 @@ function NewIdeaPage() {
       return;
     }
 
-    const idea = await saveLocally();
-    if (!idea) return;
-    setSavedToStore(true);
-
-    const ideaIdHex = generateIdeaId(idea.name, walletAddress);
+    const ideaIdHex = generateIdeaId(formData.title, walletAddress);
     if (isFirstIdea) {
       listFreeIdea(ideaIdHex);
     } else {
@@ -233,11 +227,17 @@ function NewIdeaPage() {
     }
   };
 
-  // After tx success, navigate to dashboard
+  // After tx success, save to database and navigate to dashboard
   useEffect(() => {
     if (freeSuccess || extraSuccess) {
-      const t = setTimeout(() => navigate({ to: "/dashboard" }), 1200);
-      return () => clearTimeout(t);
+      const persistAndNavigate = async () => {
+        const idea = await saveLocally();
+        if (idea) {
+          setSavedToStore(true);
+          setTimeout(() => navigate({ to: "/dashboard" }), 1200);
+        }
+      };
+      persistAndNavigate();
     }
   }, [freeSuccess, extraSuccess, navigate]);
 

@@ -110,5 +110,7 @@ export function useAuth() {
     disconnectWallet,
     switchToMantle,
     ready,
+    primaryWallet,
+    wallets,
   };
 }

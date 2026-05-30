@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useMemo, useState, useEffect } from "react";
 import { AppShell } from "@/components/nexis/AppShell";
 import { SwipeDeck } from "@/components/nexis/SwipeDeck";
 import { Flame, Clock, X, Loader2 } from "lucide-react";
@@ -16,10 +16,18 @@ type SortKey = "trending" | "newest";
 const industryFilters = ["DeFi", "AI", "RWA", "Consumer", "Gaming", "Infra", "DevTools", "Social"];
 
 function FeedPage() {
+  const navigate = useNavigate();
   const { walletAddress } = useAuth();
-  const { getUnswipedIdeas, loading, tablesReady, refreshIdeas } = useNexisData();
+  const { getUnswipedIdeas, loading, tablesReady, refreshIdeas, myProfile: profile } = useNexisData();
   const [sort, setSort] = useState<SortKey>("trending");
   const [industry, setIndustry] = useState<string | null>(null);
+
+  // Role Guard: Redirect Builders to Dashboard
+  useEffect(() => {
+    if (profile?.role === "builder") {
+      navigate({ to: "/dashboard" });
+    }
+  }, [profile, navigate]);
 
   // Get unswiped ideas from Tableland cache (excludes user's own ideas)
   const allIdeas = useMemo(
@@ -44,8 +52,8 @@ function FeedPage() {
 
   return (
     <AppShell>
-      <div className="px-4 md:px-8 pt-6 pb-2" data-testid="feed-page">
-        <div className="flex items-center justify-between mb-6 max-w-2xl mx-auto">
+      <div className="px-4 md:px-8 pt-2 sm:pt-6 pb-2" data-testid="feed-page">
+        <div className="flex items-center justify-between mb-3 sm:mb-6 max-w-2xl mx-auto">
           <div>
             <div className="text-xs text-[var(--neon)] tracking-widest uppercase">Swipe Arena</div>
             <h1 className="font-display text-2xl md:text-3xl font-bold mt-0.5">Today's drops</h1>
@@ -62,7 +70,7 @@ function FeedPage() {
         </div>
 
         <div
-          className="flex items-center gap-2 mb-6 max-w-2xl mx-auto overflow-x-auto scrollbar-hide"
+          className="flex items-center gap-2 mb-3 sm:mb-6 max-w-2xl mx-auto overflow-x-auto scrollbar-hide"
           data-testid="feed-filters"
         >
           <button

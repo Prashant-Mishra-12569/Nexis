@@ -13,6 +13,9 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    optimizeDeps: {
+      exclude: ["@xmtp/browser-sdk"],
+    },
     server: {
       host: "0.0.0.0",
       port: 3000,

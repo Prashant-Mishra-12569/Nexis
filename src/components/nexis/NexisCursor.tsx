@@ -21,8 +21,7 @@ export function NexisCursor() {
     const onMove = (e: MouseEvent) => {
       mouseX = e.clientX;
       mouseY = e.clientY;
-      dot.style.left = `${mouseX}px`;
-      dot.style.top = `${mouseY}px`;
+      dot.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0) translate3d(-50%, -50%, 0)`;
     };
 
     const onHover = () => cursor.classList.add("hover");
@@ -33,8 +32,7 @@ export function NexisCursor() {
     const tick = () => {
       cursorX += (mouseX - cursorX) * 0.15;
       cursorY += (mouseY - cursorY) * 0.15;
-      cursor.style.left = `${cursorX}px`;
-      cursor.style.top = `${cursorY}px`;
+      cursor.style.transform = `translate3d(${cursorX}px, ${cursorY}px, 0) translate3d(-50%, -50%, 0)`;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -71,8 +69,9 @@ export function NexisCursor() {
 
   return (
     <>
-      <div ref={cursorRef} className="nexis-cursor" />
-      <div ref={dotRef} className="nexis-cursor-dot" />
+      <div ref={cursorRef} className="nexis-cursor animate-fade-in" style={{ willChange: "transform" }} />
+      <div ref={dotRef} className="nexis-cursor-dot animate-fade-in" style={{ willChange: "transform" }} />
     </>
   );
 }
+

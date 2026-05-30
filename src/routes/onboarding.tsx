@@ -106,14 +106,14 @@ function OnboardingPage() {
 
   // After on-chain onboarding tx succeeds, persist verified flag + navigate
   useEffect(() => {
-    if (!walletAddress) return;
+    if (!walletAddress || isEditing) return;
     if (isSuccess || isVerified) {
       persistBuilderProfile(true);
       const t = setTimeout(() => navigate({ to: "/dashboard" }), 1200);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuccess, isVerified, walletAddress]);
+  }, [isSuccess, isVerified, walletAddress, isEditing]);
 
   // Edit-mode safety net
   useEffect(() => {

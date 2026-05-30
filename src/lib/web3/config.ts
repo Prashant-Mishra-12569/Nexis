@@ -1,7 +1,7 @@
-import { http, createConfig } from "wagmi";
+import { http, fallback, createConfig } from "wagmi";
 import { defineChain } from "viem";
 
-// Define Mantle Sepolia Testnet
+// Define Mantle Sepolia Testnet with robust fallback RPC endpoints
 export const mantleTestnet = defineChain({
   id: 5003,
   name: "Mantle Sepolia Testnet",
@@ -12,7 +12,12 @@ export const mantleTestnet = defineChain({
   },
   rpcUrls: {
     default: {
-      http: ["https://rpc.sepolia.mantle.xyz"],
+      http: [
+        "https://rpc.sepolia.mantle.xyz",
+        "https://mantle-sepolia.drpc.org",
+        "https://5003.rpc.thirdweb.com",
+        "https://endpoints.omniatech.io/v1/mantle/sepolia/public"
+      ],
     },
   },
   blockExplorers: {
@@ -24,11 +29,16 @@ export const mantleTestnet = defineChain({
   testnet: true,
 });
 
-// Wagmi config
+// Wagmi config with automatic failover/fallback transport
 export const wagmiConfig = createConfig({
   chains: [mantleTestnet],
   transports: {
-    [mantleTestnet.id]: http("https://rpc.sepolia.mantle.xyz"),
+    [mantleTestnet.id]: fallback([
+      http("https://rpc.sepolia.mantle.xyz"),
+      http("https://mantle-sepolia.drpc.org"),
+      http("https://5003.rpc.thirdweb.com"),
+      http("https://endpoints.omniatech.io/v1/mantle/sepolia/public")
+    ]),
   },
 });
 

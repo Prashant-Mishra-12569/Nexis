@@ -12,6 +12,7 @@ import { WagmiProvider } from "wagmi";
 import { wagmiConfig, mantleTestnet } from "@/lib/web3/config";
 import { NexisDataProvider } from "@/hooks/useNexisData";
 import { NexisCursor } from "@/components/nexis/NexisCursor";
+import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
 
@@ -79,23 +80,28 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Nexis — Swipe. Match. Build." },
+      { title: "Nexis — On-Chain Matchmaking Engine" },
       {
         name: "description",
         content:
-          "The on-chain matchmaking engine where founders meet conviction capital in a single swipe.",
+          "The premier Web3-native matchmaking console where high-conviction founders meet institutional allocators in a single swipe.",
       },
       { name: "author", content: "Nexis Labs" },
       { property: "og:title", content: "Nexis — Swipe. Match. Build." },
-      { property: "og:description", content: "Tinder for Web3 startups. Built on Mantle." },
+      { property: "og:description", content: "Bento-grade syndication and secure matchmaking built on Mantle. Swipe, match, and fund in seconds." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:site", content: "@NexisLabs" },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300ff9d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4v16L20 4v16'/%3E%3C/svg%3E",
       },
     ],
   }),
@@ -191,6 +197,7 @@ function RootComponent() {
           <NexisDataProvider>
             <NexisCursor />
             <Outlet />
+            <Toaster />
           </NexisDataProvider>
         </WagmiProvider>
       </QueryClientProvider>

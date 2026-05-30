@@ -1,8 +1,7 @@
 /**
- * Tableland Ideas CRUD — replaces localStorage ideasStore for ideas
+ * Ideas CRUD — migrated from Tableland to Supabase
  */
-import { getReadOnlyDatabase, getDatabase } from "./client";
-import { getTableNames } from "./config";
+import { supabase } from "../supabase/client";
 import type { JsonRpcSigner } from "ethers";
 
 export interface Idea {
@@ -45,19 +44,21 @@ export interface Financials {
 }
 
 /**
- * Get all ideas (free read)
+ * Get all ideas
  */
 export async function getIdeas(): Promise<Idea[]> {
-  const tables = getTableNames();
-  if (!tables) return [];
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db
-      .prepare(`SELECT * FROM ${tables.ideas} ORDER BY created_at DESC;`)
-      .all();
-    return results.map(rowToIdea);
+    const { data, error } = await supabase
+      .from("ideas")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("getIdeas error:", error);
+      return [];
+    }
+    return (data || []).map(rowToIdea);
   } catch (e) {
-    console.error("getIdeas error:", e);
+    console.error("getIdeas unexpected error:", e);
     return [];
   }
 }
@@ -66,15 +67,18 @@ export async function getIdeas(): Promise<Idea[]> {
  * Get ideas by owner wallet
  */
 export async function getIdeasByOwner(walletAddress: string): Promise<Idea[]> {
-  const tables = getTableNames();
-  if (!tables) return [];
+  if (!walletAddress) return [];
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db
-      .prepare(`SELECT * FROM ${tables.ideas} WHERE LOWER(wallet_address) = ?1 ORDER BY created_at DESC;`)
-      .bind(walletAddress.toLowerCase())
-      .all();
-    return results.map(rowToIdea);
+    const { data, error } = await supabase
+      .from("ideas")
+      .select("*")
+      .eq("wallet_address", walletAddress.toLowerCase())
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("getIdeasByOwner error:", error);
+      return [];
+    }
+    return (data || []).map(rowToIdea);
   } catch {
     return [];
   }
@@ -84,70 +88,67 @@ export async function getIdeasByOwner(walletAddress: string): Promise<Idea[]> {
  * Get a single idea by ID
  */
 export async function getIdeaById(ideaId: string): Promise<Idea | null> {
-  const tables = getTableNames();
-  if (!tables) return null;
+  if (!ideaId) return null;
   try {
-    const db = getReadOnlyDatabase();
-    const { results } = await db
-      .prepare(`SELECT * FROM ${tables.ideas} WHERE id = ?1;`)
-      .bind(ideaId)
-      .all();
-    return results.length > 0 ? rowToIdea(results[0]) : null;
+    const { data, error } = await supabase
+      .from("ideas")
+      .select("*")
+      .eq("id", ideaId)
+      .maybeSingle();
+    if (error) {
+      console.error("getIdeaById error:", error);
+      return null;
+    }
+    return data ? rowToIdea(data) : null;
   } catch {
     return null;
   }
 }
 
 /**
- * Add a new idea (on-chain write)
+ * Add a new idea
  */
 export async function addIdea(
-  signer: JsonRpcSigner,
+  signer: JsonRpcSigner | undefined,
   idea: Omit<Idea, "id" | "createdAt" | "matchScore">,
 ): Promise<Idea> {
-  const tables = getTableNames();
-  if (!tables) throw new Error("Tables not set up");
-
-  const db = getDatabase(signer);
   const id = crypto.randomUUID();
   const now = Date.now();
   const matchScore = Math.floor(Math.random() * 20) + 75;
 
-  const { meta } = await db
-    .prepare(
-      `INSERT INTO ${tables.ideas}
-        (id, name, tagline, description, industry, stage, ask, equity, image,
-         founder, founder_avatar, wallet_address, match_score, created_at,
-         pitch_deck_url, pitch_video_url, team_members, financials,
-         linkedin, twitter, website, ipfs_hash)
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22);`,
-    )
-    .bind(
-      id,
-      idea.name,
-      idea.tagline || "",
-      idea.description || "",
-      idea.industry || "",
-      idea.stage || "",
-      idea.ask || "",
-      idea.equity || "",
-      idea.image || "",
-      idea.founder || "",
-      idea.founderAvatar || "",
-      idea.walletAddress || "",
-      matchScore,
-      now,
-      idea.pitchDeckUrl || "",
-      idea.pitchVideoUrl || "",
-      JSON.stringify(idea.teamMembers || []),
-      JSON.stringify(idea.financials || {}),
-      idea.linkedIn || "",
-      idea.twitter || "",
-      idea.website || "",
-      idea.ipfsHash || "",
-    )
-    .run();
-  await meta.txn?.wait();
+  const payload = {
+    id,
+    name: idea.name,
+    tagline: idea.tagline || "",
+    description: idea.description || "",
+    industry: idea.industry || "",
+    stage: idea.stage || "",
+    ask: idea.ask || "",
+    equity: idea.equity || "",
+    image: idea.image || "",
+    founder: idea.founder || "",
+    founder_avatar: idea.founderAvatar || "",
+    wallet_address: (idea.walletAddress || "").toLowerCase(),
+    match_score: matchScore,
+    created_at: now,
+    pitch_deck_url: idea.pitchDeckUrl || "",
+    pitch_video_url: idea.pitchVideoUrl || "",
+    team_members: idea.teamMembers || [],
+    financials: idea.financials || {},
+    linkedin: idea.linkedIn || "",
+    twitter: idea.twitter || "",
+    website: idea.website || "",
+    ipfs_hash: idea.ipfsHash || "",
+  };
+
+  const { error } = await supabase
+    .from("ideas")
+    .insert(payload);
+
+  if (error) {
+    console.error("addIdea error:", error);
+    throw error;
+  }
 
   return { ...idea, id, createdAt: new Date(now), matchScore };
 }
@@ -168,19 +169,14 @@ function rowToIdea(row: any): Idea {
     founderAvatar: row.founder_avatar || "",
     walletAddress: row.wallet_address || "",
     matchScore: row.match_score || 80,
-    createdAt: new Date(row.created_at || 0),
+    createdAt: new Date(Number(row.created_at || 0)),
     pitchDeckUrl: row.pitch_deck_url || "",
     pitchVideoUrl: row.pitch_video_url || "",
-    teamMembers: safeJson(row.team_members, []),
-    financials: safeJson(row.financials, {}),
+    teamMembers: Array.isArray(row.team_members) ? row.team_members : [],
+    financials: row.financials || {},
     linkedIn: row.linkedin || "",
     twitter: row.twitter || "",
     website: row.website || "",
     ipfsHash: row.ipfs_hash || "",
   };
-}
-
-function safeJson<T>(val: string | null | undefined, fallback: T): T {
-  if (!val) return fallback;
-  try { return JSON.parse(val); } catch { return fallback; }
 }

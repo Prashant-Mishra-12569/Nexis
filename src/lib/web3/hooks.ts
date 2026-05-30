@@ -22,6 +22,18 @@ export function useIsVerifiedBuilder(address: string | undefined) {
   });
 }
 
+export function useBuilderIdeaCount(address: string | undefined) {
+  return useReadContract({
+    address: CONTRACT_ADDRESSES.NEXIS_FINANCE as `0x${string}`,
+    abi: NEXIS_FINANCE_ABI,
+    functionName: "builderIdeaCount",
+    args: address ? [address as `0x${string}`] : undefined,
+    query: {
+      enabled: !!address && !!CONTRACT_ADDRESSES.NEXIS_FINANCE,
+    },
+  });
+}
+
 export function usePayOnboarding() {
   const { writeContract, data: hash, isPending, error } = useWriteContract();
 
