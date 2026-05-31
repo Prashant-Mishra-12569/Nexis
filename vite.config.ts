@@ -16,6 +16,16 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["@xmtp/browser-sdk"],
   },
+  ssr: {
+    external: [
+      "@xmtp/browser-sdk",
+      "@privy-io/react-auth",
+      "@privy-io/wagmi",
+      "wagmi",
+      "viem",
+      "ethers",
+    ],
+  },
   server: {
     host: "0.0.0.0",
     port: 3000,
